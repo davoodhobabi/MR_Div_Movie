@@ -69,16 +69,17 @@ export function VideoPlayer({
   useEffect(() => {
     if (Platform.OS !== 'web') return;
     const controller = new AbortController();
-    void loadWebVideoSubtitles(player, source, controller.signal).catch(
+    const mounted = player;
+    void loadWebVideoSubtitles(mounted, source, controller.signal).catch(
       () => {
         // HTML5 cannot read MKV SoftSub without this path; keep playback going.
       },
     );
     return () => {
       controller.abort();
-      disposeWebVideoSubtitles(player);
+      disposeWebVideoSubtitles(mounted);
     };
-  }, [player, source]);
+  }, [source, player]);
 
   useEffect(() => {
     let alive = true;

@@ -1,8 +1,6 @@
 import { Platform } from 'react-native';
 import type { FolderEpisode } from './types';
-
-const FOLDER_LISTING_PROXY = '/api/folder-listing';
-const FOLDER_LISTING_DEV_PROXY_PORT = 8787;
+import { webCatalogApiUrl } from './webProxy';
 
 const FETCH_TIMEOUT_MS = 120_000;
 const MAX_SUBFOLDERS = 16;
@@ -121,16 +119,7 @@ function parseAutoIndexHtml(html: string, folderUrl: string): ParsedIndex {
 
 function listingRequestUrl(url: string): string {
   if (Platform.OS !== 'web') return url;
-  const path = `${FOLDER_LISTING_PROXY}?url=${encodeURIComponent(url)}`;
-  if (
-    typeof __DEV__ !== 'undefined' &&
-    __DEV__ &&
-    typeof window !== 'undefined'
-  ) {
-    const { protocol, hostname } = window.location;
-    return `${protocol}//${hostname}:${FOLDER_LISTING_DEV_PROXY_PORT}${path}`;
-  }
-  return path;
+  return webCatalogApiUrl('/api/folder-listing', url);
 }
 
 async function fetchHtml(url: string): Promise<string> {

@@ -1,9 +1,12 @@
 import type { VideoPlayer as ExpoVideoPlayer, SubtitleTrack } from 'expo-video';
+import { webCatalogApiUrl } from '../catalog/webProxy';
 import { pickPreferredSubtitle } from './subtitlePicker';
 import {
   extractMkvTextSubtitles,
   type ExtractedSubtitleTrack,
 } from './mkvSubtitles';
+
+const trackCache = new Map<string, Promise<ExtractedSubtitleTrack[]>>();
 
 const TRACK_ATTR = 'data-dmovie-sub';
 const STYLE_ID = 'dmovie-web-cues';
@@ -204,7 +207,25 @@ function waitForFetchableUrl(original: string, signal?: AbortSignal) {
   });
 }
 
+async function resolveViaProxy(original: string, signal?: AbortSignal) {
+  const response = await fetch(webCatalogApiUrl('/api/media-resolve', original), {
+    method: 'GET',
+    signal,
+  });
+  if (!response.ok) throw new Error(`HTTP_${response.status}`);
+  const data = (await response.json()) as { url?: string };
+  if (typeof data?.url === 'string' && data.url.startsWith('https://')) {
+    return data.url;
+  }
+  throw new Error('BAD_RESOLVE');
+}
+
 async function resolveFetchableMediaUrl(original: string, signal?: AbortSignal) {
+  try {
+    return await resolveViaProxy(original, signal);
+  } catch {
+    // Local sidecar / Vercel function may be down; try the file hosts next.
+  }
   try {
     const probe = await fetch(original, {
       method: 'GET',
@@ -339,6 +360,33 @@ function attachTracks(video: HTMLVideoElement, tracks: ExtractedSubtitleTrack[])
   requestAnimationFrame(reveal);
 }
 
+function isMkvUrl(url: string) {
+  return /\.mkv(?:$|\?)/i.test(url);
+}
+
+function tracksFor(videoUrl: string): Promise<ExtractedSubtitleTrack[]> {
+  const cached = trackCache.get(videoUrl);
+  if (cached) return cached;
+  const pending = (async () => {
+    const fetchUrl = await resolveFetchableMediaUrl(videoUrl);
+    if (isMkvUrl(fetchUrl) || isMkvUrl(videoUrl)) {
+      const extracted = await extractMkvTextSubtitles(fetchUrl);
+      if (extracted.length) return extracted;
+    }
+    const sidecar = await loadSidecarTracks(fetchUrl);
+    if (sidecar.length) return sidecar;
+    if (!isMkvUrl(fetchUrl) && !isMkvUrl(videoUrl)) {
+      return extractMkvTextSubtitles(fetchUrl);
+    }
+    return [];
+  })().catch((err) => {
+    trackCache.delete(videoUrl);
+    throw err;
+  });
+  trackCache.set(videoUrl, pending);
+  return pending;
+}
+
 export async function loadWebVideoSubtitles(
   player: ExpoVideoPlayer,
   videoUrl: string,
@@ -346,12 +394,7 @@ export async function loadWebVideoSubtitles(
 ) {
   if (typeof document === 'undefined') return;
   const video = await waitForVideo(player, signal);
-  const fetchUrl = await resolveFetchableMediaUrl(videoUrl, signal);
-  const sidecar = await loadSidecarTracks(fetchUrl, signal);
-  const tracks =
-    sidecar.length > 0
-      ? sidecar
-      : await extractMkvTextSubtitles(fetchUrl, signal);
+  const tracks = await tracksFor(videoUrl);
   if (!tracks.length || signal?.aborted) return;
   attachTracks(video, tracks);
 }
