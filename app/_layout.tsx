@@ -1,10 +1,11 @@
+import '../lib/rtl';
 import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { useEffect } from 'react';
 import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native';
 import { colors, fonts } from '../constants/theme';
 import { CatalogProvider } from '../context/CatalogContext';
-import '../lib/rtl';
 
 function AppShell() {
   return (
@@ -44,9 +45,26 @@ export default function RootLayout() {
     [fonts.bold]: require('../assets/fonts/IRANSansXNoEn-Bold.ttf'),
   });
 
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    const html = document.documentElement;
+    const body = document.body;
+    const prevHtmlOverflow = html.style.overflowX;
+    const prevBodyOverflow = body.style.overflowX;
+    const prevBodyBg = body.style.backgroundColor;
+    html.style.overflowX = 'hidden';
+    body.style.overflowX = 'hidden';
+    body.style.backgroundColor = colors.background;
+    return () => {
+      html.style.overflowX = prevHtmlOverflow;
+      body.style.overflowX = prevBodyOverflow;
+      body.style.backgroundColor = prevBodyBg;
+    };
+  }, []);
+
   if (!fontsLoaded) {
     return (
-      <View style={styles.boot}>
+      <View style={styles.root}>
         <ActivityIndicator color={colors.text} />
       </View>
     );
@@ -62,18 +80,9 @@ export default function RootLayout() {
 }
 
 const styles = StyleSheet.create({
-  boot: {
-    flex: 1,
-    backgroundColor: colors.background,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  hydrate: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
   root: {
     flex: 1,
-    ...(Platform.OS === 'web' ? { direction: 'rtl' as const } : null),
+    width: '100%',
+    backgroundColor: colors.background,
   },
 });

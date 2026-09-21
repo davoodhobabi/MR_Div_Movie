@@ -11,10 +11,13 @@ import { colors, fonts, radii, spacing } from '../../constants/theme';
 import { useCatalog } from '../../context/CatalogContext';
 import { GlassScreen } from '../../context/GlassContext';
 import { fetchDonitoGoal, type DonitoGoal } from '../../lib/donito';
+import { useLayout } from '../../lib/layout';
+import { ltrProps, ltrStyle } from '../../lib/rtl';
 
 export default function SettingsScreen() {
   const { count } = useCatalog();
   const tabBarPad = useFloatingTabBarPadding();
+  const { isTablet, gutter } = useLayout();
   const [goal, setGoal] = useState<DonitoGoal | null>(null);
 
   useEffect(() => {
@@ -31,7 +34,11 @@ export default function SettingsScreen() {
     <GlassScreen captureTabBarBlur>
       <SafeAreaView style={styles.safe} edges={['top']}>
         <ScrollView
-          contentContainerStyle={[styles.content, { paddingBottom: tabBarPad }]}
+          contentContainerStyle={[
+            styles.content,
+            { paddingBottom: tabBarPad, paddingHorizontal: gutter },
+            isTablet && styles.contentWide,
+          ]}
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.brand}>
@@ -48,7 +55,7 @@ export default function SettingsScreen() {
             accessibilityRole="link"
             accessibilityLabel={strings.telegramChannelA11y}
           >
-            <Glass style={styles.channelCard}>
+            <Glass {...ltrProps} style={[styles.channelCard, ltrStyle]}>
               <View style={styles.channelIcon}>
                 <Ionicons name="paper-plane" size={18} color={colors.text} />
               </View>
@@ -102,8 +109,12 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   content: {
-    paddingHorizontal: spacing.lg,
     gap: spacing.lg,
+  },
+  contentWide: {
+    alignSelf: 'center',
+    width: '100%',
+    maxWidth: 720,
   },
   brand: {
     alignItems: 'center',
@@ -124,7 +135,6 @@ const styles = StyleSheet.create({
     opacity: 0.85,
   },
   channelCard: {
-    direction: 'ltr',
     flexDirection: 'row-reverse',
     alignItems: 'center',
     gap: 12,

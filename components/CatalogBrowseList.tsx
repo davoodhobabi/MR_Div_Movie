@@ -1,19 +1,17 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { FlatList, PixelRatio, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { FlatList, PixelRatio, Platform, StyleSheet, Text, View } from 'react-native';
 import { strings } from '../constants/strings';
 import { colors, fonts, spacing } from '../constants/theme';
 import { useCatalog } from '../context/CatalogContext';
 import { filterCatalog } from '../lib/catalog/search';
 import type { IndexedCatalogItem } from '../lib/catalog/types';
+import { useLayout } from '../lib/layout';
 import { useFloatingTabBarPadding } from '../lib/tabBarInset';
 import { Glass } from './Glass';
 import { HomeTitleCard } from './HomeTitleCard';
 import { SearchBar } from './SearchBar';
-
-const COLUMNS = 2;
-const GRID_GAP = 12;
 
 type CatalogBrowseListProps = {
   items: IndexedCatalogItem[];
@@ -35,10 +33,10 @@ export function CatalogBrowseList({
   const { isFavorite, toggleFavorite } = useCatalog();
   const [query, setQuery] = useState('');
   const tabBarPad = useFloatingTabBarPadding();
-  const { width: screenWidth } = useWindowDimensions();
+  const { width, gutter, columns, gridGap } = useLayout();
   const cardWidth = Math.floor(
     PixelRatio.roundToNearestPixel(
-      (screenWidth - spacing.lg * 2 - GRID_GAP * (COLUMNS - 1)) / COLUMNS,
+      (width - gutter * 2 - gridGap * (columns - 1)) / columns,
     ),
   );
 
@@ -58,12 +56,12 @@ export function CatalogBrowseList({
 
   return (
     <View style={styles.root}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingHorizontal: gutter }]}>
         <Text style={styles.title}>{title}</Text>
         <Text style={styles.count}>{countLabel}</Text>
       </View>
       {searchable ? (
-        <View style={styles.searchWrap}>
+        <View style={[styles.searchWrap, { paddingHorizontal: gutter }]}>
           <SearchBar
             onChangeQuery={setQuery}
             onSubmit={setQuery}
@@ -72,16 +70,23 @@ export function CatalogBrowseList({
         </View>
       ) : null}
       <FlatList
+        key={`grid-${columns}`}
         data={visible}
         keyExtractor={(item) => `${item.imdbId}-${item.index}`}
-        numColumns={COLUMNS}
+        numColumns={columns}
         keyboardShouldPersistTaps="handled"
-        contentContainerStyle={[styles.list, { paddingBottom: tabBarPad }]}
-        columnWrapperStyle={styles.row}
+        contentContainerStyle={[
+          styles.list,
+          { paddingHorizontal: gutter, paddingBottom: tabBarPad },
+        ]}
+        columnWrapperStyle={[
+          styles.row,
+          { gap: gridGap, marginBottom: gridGap },
+        ]}
         showsVerticalScrollIndicator={false}
-        initialNumToRender={8}
+        initialNumToRender={columns * 4}
         windowSize={5}
-        maxToRenderPerBatch={8}
+        maxToRenderPerBatch={columns * 4}
         removeClippedSubviews
         renderItem={({ item }) => (
           <HomeTitleCard
@@ -111,7 +116,6 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   header: {
-    paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
     paddingBottom: spacing.md,
     flexDirection: 'row',
@@ -129,19 +133,15 @@ const styles = StyleSheet.create({
     fontFamily: fonts.regular,
   },
   searchWrap: {
-    paddingHorizontal: spacing.lg,
     paddingBottom: spacing.md,
   },
   list: {
-    paddingHorizontal: spacing.lg,
     paddingBottom: spacing.xl,
     flexGrow: 1,
   },
   row: {
-    flexDirection: 'row-reverse',
+    flexDirection: Platform.OS === 'web' ? 'row' : 'row-reverse',
     justifyContent: 'flex-start',
-    gap: GRID_GAP,
-    marginBottom: GRID_GAP,
   },
   empty: {
     marginTop: spacing.xxl,

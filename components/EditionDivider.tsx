@@ -2,6 +2,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { colors, fonts, radii, spacing } from '../constants/theme';
 import { EDITION_LABELS } from '../lib/catalog/editionLabels';
 import type { CatalogEdition } from '../lib/catalog/types';
+import { ltrProps, ltrStyle } from '../lib/rtl';
 import { Glass } from './Glass';
 
 const EDITION_COLOR: Record<CatalogEdition, string> = {
@@ -20,7 +21,10 @@ export function EditionDivider({ edition }: EditionDividerProps) {
   return (
     <View style={styles.row}>
       <View style={[styles.line, { backgroundColor: `${color}40` }]} />
-      <Glass style={[styles.badge, { borderColor: `${color}66` }]}>
+      <Glass
+        {...ltrProps}
+        style={[styles.badge, ltrStyle, { borderColor: `${color}66` }]}
+      >
         <View style={[styles.dot, { backgroundColor: color }]} />
         <Text style={[styles.label, { color }]}>{EDITION_LABELS[edition]}</Text>
       </Glass>

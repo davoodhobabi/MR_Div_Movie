@@ -4,6 +4,7 @@ import { strings } from '../constants/strings';
 import { colors, fonts, radii, spacing } from '../constants/theme';
 import { formatFileSizeLabel, formatQualityLabel } from '../lib/catalog/qualityLabel';
 import type { CatalogEdition, CatalogSource } from '../lib/catalog/types';
+import { ltrProps, ltrStyle } from '../lib/rtl';
 import { Glass } from './Glass';
 
 const EDITION_COLOR: Record<CatalogEdition, string> = {
@@ -34,8 +35,10 @@ export function SourceButton({
 
   return (
     <Glass
+      {...ltrProps}
       style={[
         styles.button,
+        ltrStyle,
         { borderColor: active ? accent : `${accent}55` },
         !ready && styles.pending,
       ]}
@@ -88,7 +91,6 @@ export function SourceButton({
 const styles = StyleSheet.create({
   button: {
     flexDirection: 'row',
-    direction: 'ltr',
     alignItems: 'center',
     gap: spacing.md,
     borderRadius: radii.button,

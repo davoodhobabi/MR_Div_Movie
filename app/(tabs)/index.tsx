@@ -13,6 +13,7 @@ import { strings } from '../../constants/strings';
 import { colors, fonts, radii, spacing } from '../../constants/theme';
 import { useCatalog } from '../../context/CatalogContext';
 import { GlassScreen } from '../../context/GlassContext';
+import { useLayout } from '../../lib/layout';
 import {
   markSupportReminderSeen,
   shouldShowSupportReminder,
@@ -27,8 +28,10 @@ export default function HomeScreen() {
   const [supportOpen, setSupportOpen] = useState(false);
   const homeFocused = useIsFocused();
   const tabBarPad = useFloatingTabBarPadding();
-  const favoriteCards = favorites.slice(0, FAVORITE_CAROUSEL_LIMIT);
-  const watchingCards = continueWatching.slice(0, 8);
+  const { isTablet, isDesktop, gutter, posterWidth } = useLayout();
+  const favoriteLimit = isDesktop ? 12 : isTablet ? 8 : FAVORITE_CAROUSEL_LIMIT;
+  const favoriteCards = favorites.slice(0, favoriteLimit);
+  const watchingCards = continueWatching.slice(0, isDesktop ? 12 : 8);
   const tagline = strings.catalogReady(count.toLocaleString('fa-IR'));
 
   useEffect(() => {
@@ -64,9 +67,11 @@ export default function HomeScreen() {
           showsVerticalScrollIndicator={false}
           contentContainerStyle={[styles.content, { paddingBottom: tabBarPad }]}
         >
-          <View style={styles.topBar}>
-            <BrandLogo size="sm" />
-            <Text style={styles.headline}>{strings.homeHeadline}</Text>
+          <View style={[styles.topBar, isTablet && styles.topBarWide, { paddingHorizontal: gutter }]}>
+            <View style={[styles.brand, isTablet && styles.brandWide]}>
+              <BrandLogo size="sm" />
+              <Text style={styles.headline}>{strings.homeHeadline}</Text>
+            </View>
             <Glass style={styles.statusPill}>
               <Ionicons name="sparkles" size={14} color={colors.gold} />
               <Text style={styles.tagline}>{tagline}</Text>
@@ -85,6 +90,7 @@ export default function HomeScreen() {
               <HomeTitleCard
                 key={`${item.imdbId}-${item.index}`}
                 item={item}
+                width={posterWidth}
                 variant="favorite"
                 favorited
                 onPress={() => openTitle(item)}
@@ -108,6 +114,7 @@ export default function HomeScreen() {
                 <HomeTitleCard
                   key={`${item.imdbId}-${entry.updatedAt}`}
                   item={item}
+                  width={posterWidth}
                   variant="watching"
                   progress={ratio}
                   subtitle={
@@ -149,10 +156,23 @@ const styles = StyleSheet.create({
     gap: spacing.xl,
   },
   topBar: {
-    paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
     alignItems: 'center',
     gap: spacing.sm,
+  },
+  topBarWide: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  brand: {
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  brandWide: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
   },
   headline: {
     fontSize: 22,

@@ -1,4 +1,8 @@
+import { Platform } from 'react-native';
 import type { FolderEpisode } from './types';
+
+const FOLDER_LISTING_PROXY = '/api/folder-listing';
+const FOLDER_LISTING_DEV_PROXY_PORT = 8787;
 
 const FETCH_TIMEOUT_MS = 120_000;
 const MAX_SUBFOLDERS = 16;
@@ -115,27 +119,48 @@ function parseAutoIndexHtml(html: string, folderUrl: string): ParsedIndex {
   return { episodes, subfolders };
 }
 
+function listingRequestUrl(url: string): string {
+  if (Platform.OS !== 'web') return url;
+  const path = `${FOLDER_LISTING_PROXY}?url=${encodeURIComponent(url)}`;
+  if (
+    typeof __DEV__ !== 'undefined' &&
+    __DEV__ &&
+    typeof window !== 'undefined'
+  ) {
+    const { protocol, hostname } = window.location;
+    return `${protocol}//${hostname}:${FOLDER_LISTING_DEV_PROXY_PORT}${path}`;
+  }
+  return path;
+}
+
 async function fetchHtml(url: string): Promise<string> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  const headers: Record<string, string> = {
+    Accept: 'text/html,application/xhtml+xml,*/*',
+  };
+  if (Platform.OS !== 'web') {
+    headers['User-Agent'] =
+      'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36';
+  }
 
   try {
-    const response = await fetch(url, {
+    const response = await fetch(listingRequestUrl(url), {
       method: 'GET',
-      headers: {
-        Accept: 'text/html,application/xhtml+xml,*/*',
-        'User-Agent':
-          'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
-      },
+      headers,
       signal: controller.signal,
     });
 
+    const html = await response.text();
     if (!response.ok) {
+      if (html === 'TIMEOUT' || html === 'IRAN_IP_REQUIRED' || html === 'EMPTY_URL') {
+        throw new Error(html);
+      }
       if (response.status === 503) throw new Error('IRAN_IP_REQUIRED');
+      if (response.status === 504) throw new Error('TIMEOUT');
       throw new Error(`HTTP_${response.status}`);
     }
 
-    const html = await response.text();
     if (!html || html.length < 20) throw new Error('EMPTY_HTML');
 
     if (

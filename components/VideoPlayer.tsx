@@ -8,6 +8,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   BackHandler,
+  Platform,
   Pressable,
   StatusBar,
   StyleSheet,
@@ -18,6 +19,10 @@ import { strings } from '../constants/strings';
 import { colors, fonts, radii, spacing } from '../constants/theme';
 import { encodeMediaUrl } from '../lib/catalog/videoSource';
 import { pickPreferredSubtitle } from '../lib/player/subtitlePicker';
+import {
+  disposeWebVideoSubtitles,
+  loadWebVideoSubtitles,
+} from '../lib/player/webSubtitleTracks';
 
 type VideoPlayerProps = {
   uri: string;
@@ -60,6 +65,20 @@ export function VideoPlayer({
     didSeekRef.current = false;
     lastProgressRef.current = { currentTime: 0, duration: 0 };
   }, [uri, onFullscreenChange]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const controller = new AbortController();
+    void loadWebVideoSubtitles(player, source, controller.signal).catch(
+      () => {
+        // HTML5 cannot read MKV SoftSub without this path; keep playback going.
+      },
+    );
+    return () => {
+      controller.abort();
+      disposeWebVideoSubtitles(player);
+    };
+  }, [player, source]);
 
   useEffect(() => {
     let alive = true;

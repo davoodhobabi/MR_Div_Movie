@@ -3,6 +3,8 @@ import type { ReactNode } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { strings } from '../constants/strings';
 import { colors, fonts, radii, spacing } from '../constants/theme';
+import { useLayout } from '../lib/layout';
+import { ltrProps, ltrStyle } from '../lib/rtl';
 import { Glass } from './Glass';
 
 type HomeCarouselProps = {
@@ -26,9 +28,10 @@ export function HomeCarousel({
   emptyTitle,
   emptyHint,
 }: HomeCarouselProps) {
+  const { isDesktop, gutter, gridGap } = useLayout();
   return (
     <View style={styles.section}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingHorizontal: gutter }]}>
         <View style={styles.titleRow}>
           <Ionicons name={icon} size={16} color={iconColor} />
           <Text style={styles.title}>{title}</Text>
@@ -48,23 +51,28 @@ export function HomeCarousel({
       </View>
 
       {empty ? (
-        <Glass style={styles.empty}>
+        <Glass style={[styles.empty, { marginHorizontal: gutter }]}>
           <View style={styles.emptyIcon}>
             <Ionicons name={icon} size={22} color={iconColor} />
           </View>
           {emptyTitle ? <Text style={styles.emptyTitle}>{emptyTitle}</Text> : null}
           {emptyHint ? <Text style={styles.emptyHint}>{emptyHint}</Text> : null}
         </Glass>
-      ) : (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.track}
-          style={styles.scroller}
-        >
-          {children}
-        </ScrollView>
-      )}
+      ) : isDesktop ? (
+          <View {...ltrProps} style={[styles.grid, ltrStyle, { paddingHorizontal: gutter, gap: gridGap }]}>
+            {children}
+          </View>
+        ) : (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={[styles.track, { paddingHorizontal: gutter, gap: gridGap }]}
+            style={[styles.scroller, ltrStyle]}
+            {...ltrProps}
+          >
+            {children}
+          </ScrollView>
+        )}
     </View>
   );
 }
@@ -74,7 +82,6 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   header: {
-    paddingHorizontal: spacing.lg,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -102,16 +109,15 @@ const styles = StyleSheet.create({
   pressed: {
     opacity: 0.75,
   },
-  scroller: {
-    direction: 'ltr',
-  },
+  scroller: {},
   track: {
     flexDirection: 'row-reverse',
-    paddingHorizontal: spacing.lg,
-    gap: 12,
+  },
+  grid: {
+    flexDirection: 'row-reverse',
+    flexWrap: 'wrap',
   },
   empty: {
-    marginHorizontal: spacing.lg,
     borderRadius: radii.card,
     paddingVertical: spacing.xl,
     paddingHorizontal: spacing.lg,

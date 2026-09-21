@@ -20,6 +20,7 @@ import type {
   SeriesQualityOption,
   SeriesSeason,
 } from '../lib/catalog/types';
+import { ltrProps, ltrStyle } from '../lib/rtl';
 import { CATALOG_EDITIONS } from '../lib/catalog/types';
 
 const EDITION_COLOR: Record<CatalogEdition, string> = {
@@ -147,7 +148,7 @@ export function SeriesPicker({
 
   return (
     <View style={styles.wrap}>
-      <View style={styles.headerRow}>
+      <View {...ltrProps} style={[styles.headerRow, ltrStyle]}>
         <Text style={styles.sectionTitle}>
           {step === 'season'
             ? strings.pickSeason
@@ -157,7 +158,7 @@ export function SeriesPicker({
         </Text>
         {step !== 'season' ? (
           <Pressable onPress={goBack} hitSlop={8}>
-            <Glass style={styles.backBtn}>
+            <Glass {...ltrProps} style={[styles.backBtn, ltrStyle]}>
               <Ionicons name="arrow-undo" size={16} color={colors.textMuted} />
               <Text style={styles.backText}>{strings.backStep}</Text>
             </Glass>
@@ -175,7 +176,7 @@ export function SeriesPicker({
       ) : null}
 
       {step === 'season' ? (
-        <View style={styles.chipRow}>
+        <View {...ltrProps} style={[styles.chipRow, ltrStyle]}>
           {seasons.map((entry) => {
             const active = entry.season === seasonNumber;
             return (
@@ -215,7 +216,7 @@ export function SeriesPicker({
                     onPress={() => selectQuality(option)}
                     style={({ pressed }) => [pressed && styles.pressed]}
                   >
-                    <Glass style={styles.optionRow}>
+                    <Glass {...ltrProps} style={[styles.optionRow, ltrStyle]}>
                     <Ionicons
                       name="chevron-back"
                       size={18}
@@ -277,10 +278,12 @@ export function SeriesPicker({
                   : colors.accent;
                 const ready = episode.url.trim().length > 0;
                 return (
-                  <Glass
+                    <Glass
                     key={episode.url}
+                    {...ltrProps}
                     style={[
                       styles.optionRow,
+                      ltrStyle,
                       {
                         borderColor: active ? accent : `${accent}55`,
                       },
@@ -426,7 +429,6 @@ const styles = StyleSheet.create({
   },
   optionRow: {
     flexDirection: 'row',
-    direction: 'ltr',
     alignItems: 'center',
     gap: spacing.md,
     borderRadius: radii.button,

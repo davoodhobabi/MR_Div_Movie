@@ -2,6 +2,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { strings } from '../constants/strings';
 import { colors, fonts, radii } from '../constants/theme';
 import { formatToman, type DonitoGoal } from '../lib/donito';
+import { ltrProps, ltrStyle } from '../lib/rtl';
 
 export function SupportGoalBar({ goal }: { goal: DonitoGoal }) {
   const ratio =
@@ -9,7 +10,7 @@ export function SupportGoalBar({ goal }: { goal: DonitoGoal }) {
   const percent = Math.round(ratio * 100).toLocaleString('fa-IR');
 
   return (
-    <View style={styles.goal}>
+    <View {...ltrProps} style={[styles.goal, ltrStyle]}>
       <Text style={styles.goalTitle}>{goal.title}</Text>
       <View style={styles.track}>
         <View style={[styles.fill, { width: `${Math.max(ratio * 100, 4)}%` }]} />
@@ -30,7 +31,6 @@ export function SupportGoalBar({ goal }: { goal: DonitoGoal }) {
 const styles = StyleSheet.create({
   goal: {
     alignSelf: 'stretch',
-    direction: 'ltr',
     gap: 8,
   },
   goalTitle: {

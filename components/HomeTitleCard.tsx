@@ -6,6 +6,7 @@ import { strings } from '../constants/strings';
 import { colors, fonts, radii } from '../constants/theme';
 import { usePosterUrl } from '../lib/catalog/poster';
 import { isSeriesItem, type CatalogItem } from '../lib/catalog/types';
+import { ltrProps, ltrStyle } from '../lib/rtl';
 
 const POSTER_WIDTH = 140;
 const POSTER_ASPECT = 3 / 2;
@@ -149,7 +150,7 @@ export function HomeTitleCard({
               blurMethod="dimezisBlurView"
               style={styles.copyBlur}
             >
-              <View style={styles.copyInner}>
+              <View {...ltrProps} style={[styles.copyInner, ltrStyle]}>
                 {persian ? (
                   <Text style={styles.titleFa} numberOfLines={2}>
                     {persian}
@@ -161,7 +162,7 @@ export function HomeTitleCard({
                 >
                   {item.title}
                 </Text>
-                <View style={styles.meta}>
+                <View {...ltrProps} style={[styles.meta, ltrStyle]}>
                   {rating ? (
                     <View style={styles.rating}>
                       <Ionicons name="star" size={11} color={colors.gold} />
@@ -268,7 +269,6 @@ const styles = StyleSheet.create({
   },
   copyInner: {
     width: '100%',
-    direction: 'ltr',
     alignItems: 'flex-end',
     paddingHorizontal: 10,
     paddingTop: 8,
@@ -304,7 +304,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'flex-end',
     width: '100%',
-    direction: 'ltr',
     gap: 8,
     marginTop: 2,
   },

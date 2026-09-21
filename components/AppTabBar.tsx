@@ -6,6 +6,8 @@ import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg';
 import { strings } from '../constants/strings';
 import { colors, fonts, radii, spacing } from '../constants/theme';
 import { TabBarBlurTargetContext } from '../context/GlassContext';
+import { useLayout } from '../lib/layout';
+import { ltrProps, ltrStyle } from '../lib/rtl';
 
 type TabRoute = { key: string; name: string };
 
@@ -88,6 +90,7 @@ function BottomGlow({ width, height, id }: { width: number; height: number; id: 
 
 export function AppTabBar({ state, navigation, insets }: TabBarProps) {
   const tabBarBlur = useContext(TabBarBlurTargetContext);
+  const { isTablet, gutter } = useLayout();
 
   return (
     <View
@@ -95,7 +98,7 @@ export function AppTabBar({ state, navigation, insets }: TabBarProps) {
       style={[
         styles.root,
         {
-          paddingHorizontal: spacing.lg,
+          paddingHorizontal: gutter,
           paddingBottom: insets.bottom + spacing.lg,
         },
       ]}
@@ -108,10 +111,10 @@ export function AppTabBar({ state, navigation, insets }: TabBarProps) {
         blurMethod="dimezisBlurView"
         blurReductionFactor={2}
         blurTarget={tabBarBlur?.target ?? undefined}
-        style={styles.bar}
+        style={[styles.bar, isTablet && styles.barWide]}
       >
         <View pointerEvents="none" style={styles.tint} />
-        <View style={styles.row}>
+        <View {...ltrProps} style={[styles.row, ltrStyle]}>
           {state.routes.map((route, index) => {
             const meta = TAB_META[route.name];
             if (!meta) return null;
@@ -210,12 +213,16 @@ const styles = StyleSheet.create({
     borderRadius: radii.search,
     backgroundColor: 'transparent',
   },
+  barWide: {
+    width: '100%',
+    maxWidth: 680,
+    alignSelf: 'center',
+  },
   tint: {
     ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(8, 10, 16, 0.4)',
   },
   row: {
-    direction: 'ltr',
     flexDirection: 'row-reverse',
     alignItems: 'stretch',
     paddingHorizontal: 4,

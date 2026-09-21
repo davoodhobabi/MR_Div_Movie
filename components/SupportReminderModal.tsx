@@ -84,9 +84,12 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: 'rgba(7, 8, 12, 0.72)',
     justifyContent: 'center',
+    alignItems: 'center',
     paddingHorizontal: spacing.lg,
   },
   sheet: {
+    width: '100%',
+    maxWidth: 440,
     borderRadius: radii.card,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.xl,

@@ -1,19 +1,18 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Stack, useLocalSearchParams } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   Linking,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
-  useWindowDimensions,
   View,
 } from 'react-native';
 import { EditionDivider } from '../../components/EditionDivider';
-import { FavoriteButton } from '../../components/FavoriteButton';
 import { Glass } from '../../components/Glass';
 import { SeriesPicker } from '../../components/SeriesPicker';
 import { SourceButton } from '../../components/SourceButton';
@@ -21,6 +20,8 @@ import { strings } from '../../constants/strings';
 import { colors, fonts, radii, spacing } from '../../constants/theme';
 import { useCatalog } from '../../context/CatalogContext';
 import { GlassScreen } from '../../context/GlassContext';
+import { useLayout } from '../../lib/layout';
+import { ltrProps, ltrStyle } from '../../lib/rtl';
 import { encodeMediaUrl } from '../../lib/catalog/videoSource';
 import { formatQualityLabel } from '../../lib/catalog/qualityLabel';
 import {
@@ -51,6 +52,24 @@ function paramString(value: string | string[] | undefined): string | undefined {
   return undefined;
 }
 
+function WebTitleBackButton() {
+  const router = useRouter();
+  return (
+    <Pressable
+      onPress={() => {
+        if (router.canGoBack()) router.back();
+        else router.replace('/(tabs)');
+      }}
+      hitSlop={12}
+      accessibilityRole="button"
+      accessibilityLabel={strings.backStep}
+      style={styles.webBackBtn}
+    >
+      <Ionicons name="chevron-forward" size={28} color={colors.text} />
+    </Pressable>
+  );
+}
+
 type ActivePlayback = {
   uri: string;
   referer?: string;
@@ -78,9 +97,9 @@ export default function TitleScreen() {
   const [playerFullscreen, setPlayerFullscreen] = useState(false);
   const resumeStarted = useRef(false);
   const scrollRef = useRef<ScrollView>(null);
-  const { width: windowWidth } = useWindowDimensions();
+  const { width: windowWidth, isTablet, gutter } = useLayout();
   // Leave room for the back button without crushing the two-line title.
-  const navTitleWidth = Math.max(160, windowWidth - 156);
+  const navTitleWidth = Math.max(160, windowWidth - 120);
 
   const seasons = item?.seasons ?? [];
   const isSeries = item?.type === 'series' && seasons.length > 0;
@@ -201,18 +220,32 @@ export default function TitleScreen() {
       <Stack.Screen
         options={{
           headerShown: !playerFullscreen,
+          headerBackVisible: Platform.OS !== 'web',
           headerTitleAlign: 'center',
           headerStyle: {
             backgroundColor: colors.background,
           },
-          headerTitleContainerStyle: {
-            width: navTitleWidth,
-            maxWidth: navTitleWidth,
-            paddingVertical: 8,
-            alignItems: 'center',
-          },
+          headerLeft: Platform.OS === 'web' ? () => <WebTitleBackButton /> : undefined,
+          headerLeftContainerStyle:
+            Platform.OS === 'web'
+              ? styles.webBackWrap
+              : undefined,
+          headerTitleContainerStyle:
+            Platform.OS === 'web'
+              ? styles.webTitleWrap
+              : {
+                  width: navTitleWidth,
+                  maxWidth: navTitleWidth,
+                  paddingVertical: 8,
+                  alignItems: 'center',
+                },
           headerTitle: () => (
-            <View style={[styles.navTitleWrap, { width: navTitleWidth }]}>
+            <View
+              style={[
+                styles.navTitleWrap,
+                Platform.OS === 'web' ? styles.webNavTitle : { width: navTitleWidth },
+              ]}
+            >
               {persian ? (
                 <Text style={styles.navTitleFa} numberOfLines={1}>
                   {persian}
@@ -229,17 +262,17 @@ export default function TitleScreen() {
               </Text>
             </View>
           ),
-          headerRight: () => (
-            <FavoriteButton
-              favorited={favorited}
-              onPress={() => toggleFavorite(item.imdbId)}
-            />
-          ),
         }}
       />
 
+      <View style={[styles.split, isTablet && styles.splitWide]}>
       <View
-        style={[styles.playerDock, playerFullscreen && styles.playerDockFullscreen]}
+        style={[
+          styles.playerDock,
+          { paddingHorizontal: playerFullscreen ? 0 : gutter },
+          isTablet && styles.playerDockWide,
+          playerFullscreen && styles.playerDockFullscreen,
+        ]}
       >
         {playback ? (
           <>
@@ -273,7 +306,7 @@ export default function TitleScreen() {
               />
             </Suspense>
             {playerFullscreen ? null : (
-              <Glass style={styles.nowPlaying}>
+              <Glass {...ltrProps} style={[styles.nowPlaying, ltrStyle]}>
                 <View style={styles.liveDot} />
                 <Text style={styles.nowPlayingLabel}>
                   {strings.nowPlayingLabel}
@@ -299,12 +332,12 @@ export default function TitleScreen() {
       <ScrollView
         ref={scrollRef}
         style={styles.screen}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, { paddingHorizontal: gutter }]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.hero}>
-          <View style={styles.chips}>
+          <View {...ltrProps} style={[styles.chips, ltrStyle]}>
             <Pressable
               onPress={() => toggleFavorite(item.imdbId)}
               style={({ pressed }) => [pressed && styles.linkPressed]}
@@ -361,7 +394,7 @@ export default function TitleScreen() {
           </View>
         </View>
 
-        <Glass style={styles.stats}>
+        <Glass {...ltrProps} style={[styles.stats, ltrStyle]}>
           <View style={styles.stat}>
             <Text style={styles.statLabel}>{strings.imdb}</Text>
             <Text style={styles.statValue}>{item.imdbId}</Text>
@@ -415,16 +448,23 @@ export default function TitleScreen() {
           ))
         )}
       </ScrollView>
+      </View>
     </GlassScreen>
   );
 }
 
 const styles = StyleSheet.create({
+  split: {
+    flex: 1,
+  },
+  splitWide: {
+    flexDirection: 'row',
+  },
   screen: {
     flex: 1,
   },
   content: {
-    padding: spacing.lg,
+    paddingTop: spacing.lg,
     paddingBottom: 96,
     gap: spacing.md,
   },
@@ -439,10 +479,13 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   playerDock: {
-    paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
     paddingBottom: spacing.sm,
     gap: spacing.sm,
+  },
+  playerDockWide: {
+    flex: 1.2,
+    maxWidth: 820,
   },
   playerDockFullscreen: {
     ...StyleSheet.absoluteFill,
@@ -514,6 +557,29 @@ const styles = StyleSheet.create({
     paddingBottom: 2,
     paddingHorizontal: 4,
   },
+  webBackWrap: {
+    zIndex: 4,
+    minWidth: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  webBackBtn: {
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  webTitleWrap: {
+    flexGrow: 1,
+    flexShrink: 1,
+    maxWidth: '72%',
+    paddingVertical: 8,
+    alignItems: 'center',
+  },
+  webNavTitle: {
+    width: '100%',
+    maxWidth: 520,
+  },
   navTitleFa: {
     color: colors.text,
     fontSize: 20,
@@ -534,7 +600,6 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bold,
   },
   chips: {
-    direction: 'ltr',
     flexDirection: 'row-reverse',
     flexWrap: 'wrap',
     justifyContent: 'flex-start',
@@ -552,7 +617,7 @@ const styles = StyleSheet.create({
     fontFamily: fonts.medium,
   },
   ratingChip: {
-    flexDirection: 'row',
+    flexDirection: 'row-reverse',
     alignItems: 'center',
     gap: 5,
   },
@@ -563,7 +628,7 @@ const styles = StyleSheet.create({
     writingDirection: 'ltr',
   },
   favoriteChip: {
-    flexDirection: 'row',
+    flexDirection: 'row-reverse',
     alignItems: 'center',
     gap: 5,
   },
@@ -579,7 +644,7 @@ const styles = StyleSheet.create({
     color: colors.accent,
   },
   imdbChip: {
-    flexDirection: 'row',
+    flexDirection: 'row-reverse',
     alignItems: 'center',
     gap: 5,
   },

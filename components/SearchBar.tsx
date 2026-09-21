@@ -85,8 +85,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     minHeight: 58,
     width: '100%',
-    maxWidth: 560,
-    alignSelf: 'center',
+    alignSelf: 'stretch',
     gap: spacing.sm,
   },
   focused: {
