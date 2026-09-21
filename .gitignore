@@ -42,3 +42,4 @@ yarn-error.*
 
 .tmp-py/
 *.apk
+lib/catalog/data/.enrich-wikidata.json

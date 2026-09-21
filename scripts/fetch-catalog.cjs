@@ -1,12 +1,9 @@
 #!/usr/bin/env node
 /**
- * Build-time catalog fetch: download archive.js → parse → indexed JSON for the app bundle.
+ * Build-time catalog fetch: parse 10_thous.js → indexed JSON for the app bundle.
  *
- *   node scripts/fetch-catalog.mjs
- *   CATALOG_URL=... node scripts/fetch-catalog.mjs
- *   CATALOG_SOURCE_FILE=/path/to/10_thous.js node scripts/fetch-catalog.mjs
- *
- * Falls back to data/catalog.items.json (searchKey only) if download is blocked.
+ * Prefers data/10_thous.js, then CATALOG_SOURCE_FILE, then download.
+ * Falls back to data/catalog.items.json if download is blocked.
  */
 const fs = require('fs');
 const path = require('path');
@@ -18,6 +15,7 @@ const OUT_DIR = path.join(ROOT, 'lib/catalog/data');
 const OUT_FILE = path.join(OUT_DIR, 'bundledCatalog.json');
 const META_FILE = path.join(OUT_DIR, 'bundledCatalog.meta.json');
 const FALLBACK_ITEMS = path.join(ROOT, 'data/catalog.items.json');
+const LOCAL_ARCHIVE = path.join(ROOT, 'data/10_thous.js');
 
 const DEFAULT_BASE_URL = 'https://dls6.aparatchi-dlcenter.top/';
 const CATALOG_JS_PATH = 'DonyayeSerial/10_thous.js';
@@ -322,12 +320,67 @@ function writeBundle(items, meta) {
   fs.mkdirSync(OUT_DIR, { recursive: true });
   const json = JSON.stringify(items);
   fs.writeFileSync(OUT_FILE, json);
-  fs.writeFileSync(META_FILE, JSON.stringify(meta, null, 2));
+  fs.writeFileSync(META_FILE, JSON.stringify(meta, null, 2) + '\n');
+  const slim = items.map(({ searchKey: _searchKey, ...item }) => item);
+  fs.writeFileSync(FALLBACK_ITEMS, JSON.stringify(slim));
   const mb = (Buffer.byteLength(json) / (1024 * 1024)).toFixed(2);
   console.log(
     `[fetch-catalog] wrote ${items.length} items (${mb} MB) → ${path.relative(ROOT, OUT_FILE)}`,
   );
   console.log(`[fetch-catalog] meta → ${path.relative(ROOT, META_FILE)}`);
+}
+
+const YEAR_PATH = /\/(?:movies|series|serial)\/((?:19|20)\d{2})\//i;
+const YEAR_DOT = /\.((?:19|20)\d{2})\./;
+
+function yearFromText(text) {
+  const path = String(text ?? '').match(YEAR_PATH);
+  if (path) {
+    const year = Number(path[1]);
+    if (year >= 1888 && year <= 2030) return year;
+  }
+  const dotted = String(text ?? '').match(YEAR_DOT);
+  if (dotted) {
+    const year = Number(dotted[1]);
+    if (year >= 1888 && year <= 2030) return year;
+  }
+  return undefined;
+}
+
+function yearFromItem(item) {
+  if (typeof item.year === 'number' && Number.isFinite(item.year)) {
+    return item.year;
+  }
+  for (const source of item.urls ?? []) {
+    const year =
+      yearFromText(source.url) ?? yearFromText(source.title);
+    if (year != null) return year;
+  }
+  for (const season of item.seasons ?? []) {
+    for (const option of season.options ?? []) {
+      const year =
+        yearFromText(option.folderUrl) ?? yearFromText(option.quality);
+      if (year != null) return year;
+    }
+  }
+  return undefined;
+}
+
+function mergePreviousMeta(items, previous) {
+  const prevById = new Map();
+  for (const prev of previous ?? []) {
+    if (prev?.imdbId) prevById.set(prev.imdbId, prev);
+  }
+  return items.map((item) => {
+    const prev = prevById.get(item.imdbId);
+    const titleFa = item.titleFa || prev?.titleFa;
+    const year = yearFromItem(item) ?? prev?.year;
+    return {
+      ...item,
+      titleFa: titleFa || undefined,
+      year: year ?? undefined,
+    };
+  });
 }
 
 function fromFallbackItems() {
@@ -343,22 +396,33 @@ function fromFallbackItems() {
   if (!Array.isArray(raw) || raw.length === 0) {
     throw new Error('FALLBACK_EMPTY');
   }
-  return indexItems(raw);
+  let previous = [];
+  if (fs.existsSync(OUT_FILE)) {
+    try {
+      const existing = JSON.parse(fs.readFileSync(OUT_FILE, 'utf8'));
+      if (Array.isArray(existing)) previous = existing;
+    } catch {
+      previous = [];
+    }
+  }
+  return indexItems(mergePreviousMeta(raw, previous));
 }
 
 async function main() {
   const baseUrl = process.env.CATALOG_BASE_URL || DEFAULT_BASE_URL;
-  const sourceFile = process.env.CATALOG_SOURCE_FILE;
   const url = process.env.CATALOG_URL || DEFAULT_URL;
+  const sourceFile =
+    process.env.CATALOG_SOURCE_FILE ||
+    (fs.existsSync(LOCAL_ARCHIVE) ? LOCAL_ARCHIVE : '');
 
   let items;
   let source = 'download';
 
   if (sourceFile) {
-    console.log(`[fetch-catalog] reading ${sourceFile}`);
+    console.log(`[fetch-catalog] reading ${path.relative(ROOT, sourceFile)}`);
     const text = fs.readFileSync(sourceFile, 'utf8');
     items = indexItems(parseArchiveJs(text, baseUrl));
-    source = sourceFile;
+    source = path.relative(ROOT, sourceFile);
   } else {
     try {
       console.log(`[fetch-catalog] downloading ${url}`);

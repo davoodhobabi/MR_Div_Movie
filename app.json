@@ -2,7 +2,7 @@
   "expo": {
     "name": "MrDiv_Movie",
     "slug": "DMovie",
-    "version": "1.0.36",
+    "version": "1.0.38",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "dmovie",
@@ -27,7 +27,7 @@
     },
     "android": {
       "package": "com.dmovie.app",
-      "versionCode": 10036,
+      "versionCode": 10038,
       "adaptiveIcon": {
         "backgroundColor": "#000000",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -37,6 +37,8 @@
       "predictiveBackGestureEnabled": false
     },
     "web": {
+      "bundler": "metro",
+      "output": "single",
       "favicon": "./assets/favicon.png"
     },
     "plugins": [

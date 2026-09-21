@@ -1,0 +1,6 @@
+data/10_thous.js
+*.apk
+/android
+/ios
+.expo
+.tmp-py

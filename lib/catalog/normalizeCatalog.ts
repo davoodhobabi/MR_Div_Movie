@@ -59,6 +59,38 @@ function normalizeQualityOption(value: unknown): SeriesQualityOption | null {
   };
 }
 
+const YEAR_PATH = /\/(?:movies|series|serial)\/((?:19|20)\d{2})\//i;
+const YEAR_DOT = /\.((?:19|20)\d{2})\./;
+
+function yearFromText(text: string): number | undefined {
+  const path = text.match(YEAR_PATH);
+  if (path) {
+    const year = Number(path[1]);
+    if (year >= 1888 && year <= 2030) return year;
+  }
+  const dotted = text.match(YEAR_DOT);
+  if (dotted) {
+    const year = Number(dotted[1]);
+    if (year >= 1888 && year <= 2030) return year;
+  }
+  return undefined;
+}
+
+function yearFromItem(item: CatalogItem): number | undefined {
+  for (const source of item.urls ?? []) {
+    const fromUrl = yearFromText(source.url) ?? yearFromText(source.title);
+    if (fromUrl != null) return fromUrl;
+  }
+  for (const season of item.seasons ?? []) {
+    for (const option of season.options ?? []) {
+      const fromFolder =
+        yearFromText(option.folderUrl) ?? yearFromText(option.quality);
+      if (fromFolder != null) return fromFolder;
+    }
+  }
+  return undefined;
+}
+
 function normalizeSeason(value: unknown): SeriesSeason | null {
   if (!value || typeof value !== 'object') return null;
   const season = value as Partial<SeriesSeason>;
@@ -87,7 +119,7 @@ export function normalizeItem(value: CatalogItem): CatalogItem {
     year:
       typeof value.year === 'number' && Number.isFinite(value.year)
         ? value.year
-        : undefined,
+        : yearFromItem({ ...value, urls: rawUrls, seasons }),
     urls: rawUrls
       .map(normalizeSource)
       .filter((source): source is CatalogSource => source !== null),
