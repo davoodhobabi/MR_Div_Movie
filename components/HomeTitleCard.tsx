@@ -38,7 +38,12 @@ export function HomeTitleCard({
   const posterUrl = usePosterUrl(item);
   const posterTargetRef = useRef<View | null>(null);
   const [posterFailed, setPosterFailed] = useState(false);
+  const [posterAttempt, setPosterAttempt] = useState(0);
   const showPoster = Boolean(posterUrl) && !posterFailed;
+  const posterSourceUri =
+    posterUrl && posterAttempt > 0
+      ? `${posterUrl}${posterUrl.includes('?') ? '&' : '?'}r=${posterAttempt}`
+      : posterUrl;
   const frameWidth = PixelRatio.roundToNearestPixel(width);
   const frameHeight = PixelRatio.roundToNearestPixel(frameWidth * POSTER_ASPECT);
   const persian = item.titleFa?.trim();
@@ -62,6 +67,7 @@ export function HomeTitleCard({
 
   useEffect(() => {
     setPosterFailed(false);
+    setPosterAttempt(0);
   }, [item.imdbId, posterUrl]);
 
   return (
@@ -78,18 +84,24 @@ export function HomeTitleCard({
           {showPoster ? (
             <>
               <Image
-                source={{ uri: posterUrl as string }}
+                source={{ uri: posterSourceUri as string }}
                 style={styles.fill}
                 resizeMode="cover"
                 blurRadius={18}
                 fadeDuration={0}
               />
               <Image
-                source={{ uri: posterUrl as string }}
+                source={{ uri: posterSourceUri as string }}
                 style={styles.fill}
                 resizeMode="contain"
                 fadeDuration={0}
-                onError={() => setPosterFailed(true)}
+                onError={() => {
+                  if (posterAttempt < 2) {
+                    setPosterAttempt((n) => n + 1);
+                    return;
+                  }
+                  setPosterFailed(true);
+                }}
               />
             </>
           ) : (

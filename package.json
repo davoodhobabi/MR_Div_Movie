@@ -46,7 +46,8 @@
     "export:web": "expo export -p web",
     "postinstall": "node scripts/patch-expo-video-ffmpeg.js",
     "catalog:from-html": "python3 scripts/html-to-catalog.py",
-    "debug:apk": "bash scripts/install-debug.sh"
+    "debug:apk": "bash scripts/install-debug.sh",
+    "deploy:host": "node scripts/deploy-host-ftp.cjs"
   },
   "expo": {
     "autolinking": {

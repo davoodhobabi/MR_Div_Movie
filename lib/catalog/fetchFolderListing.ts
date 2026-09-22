@@ -117,9 +117,12 @@ function parseAutoIndexHtml(html: string, folderUrl: string): ParsedIndex {
   return { episodes, subfolders };
 }
 
-function listingRequestUrl(url: string): string {
-  if (Platform.OS !== 'web') return url;
-  return webCatalogApiUrl('/api/episodes', url);
+function listingRequestUrls(url: string): string[] {
+  if (Platform.OS !== 'web') return [url];
+  return [
+    webCatalogApiUrl('/api/episodes', url),
+    webCatalogApiUrl('/api/folder-listing', url),
+  ];
 }
 
 async function fetchHtml(url: string): Promise<string> {
@@ -134,32 +137,36 @@ async function fetchHtml(url: string): Promise<string> {
   }
 
   try {
-    const response = await fetch(listingRequestUrl(url), {
-      method: 'GET',
-      headers,
-      signal: controller.signal,
-    });
-
-    const html = await response.text();
-    if (!response.ok) {
-      if (html === 'TIMEOUT' || html === 'IRAN_IP_REQUIRED' || html === 'EMPTY_URL') {
-        throw new Error(html);
+    let lastError: Error | null = null;
+    for (const requestUrl of listingRequestUrls(url)) {
+      const response = await fetch(requestUrl, {
+        method: 'GET',
+        headers,
+        signal: controller.signal,
+      });
+      const html = await response.text();
+      if (response.status === 404) {
+        lastError = new Error('HTTP_404');
+        continue;
       }
-      if (response.status === 503) throw new Error('IRAN_IP_REQUIRED');
-      if (response.status === 504) throw new Error('TIMEOUT');
-      throw new Error(`HTTP_${response.status}`);
+      if (!response.ok) {
+        if (html === 'TIMEOUT' || html === 'IRAN_IP_REQUIRED' || html === 'EMPTY_URL') {
+          throw new Error(html);
+        }
+        if (response.status === 503) throw new Error('IRAN_IP_REQUIRED');
+        if (response.status === 504) throw new Error('TIMEOUT');
+        throw new Error(`HTTP_${response.status}`);
+      }
+      if (!html || html.length < 20) throw new Error('EMPTY_HTML');
+      if (
+        /آی\s*پی\s*داخلی|Service Unavailable|vpn|پروکسی/i.test(html) &&
+        !VIDEO_EXT_RE.test(html)
+      ) {
+        throw new Error('IRAN_IP_REQUIRED');
+      }
+      return html;
     }
-
-    if (!html || html.length < 20) throw new Error('EMPTY_HTML');
-
-    if (
-      /آی\s*پی\s*داخلی|Service Unavailable|vpn|پروکسی/i.test(html) &&
-      !VIDEO_EXT_RE.test(html)
-    ) {
-      throw new Error('IRAN_IP_REQUIRED');
-    }
-
-    return html;
+    throw lastError || new Error('HTTP_404');
   } finally {
     clearTimeout(timer);
   }

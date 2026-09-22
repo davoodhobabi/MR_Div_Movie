@@ -9,7 +9,8 @@
     "api/media-range.js": { "maxDuration": 30 },
     "api/media-resolve.js": { "maxDuration": 30 },
     "api/folder-listing.js": { "maxDuration": 30 },
-    "api/episodes.js": { "maxDuration": 30 }
+    "api/episodes.js": { "maxDuration": 30 },
+    "api/poster-image.js": { "maxDuration": 20 }
   },
   "rewrites": [
     {

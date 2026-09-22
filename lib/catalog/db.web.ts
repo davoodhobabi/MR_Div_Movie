@@ -11,6 +11,8 @@ export async function getPoster(_imdbId: string): Promise<PosterRow | null> {
   return null;
 }
 
+export async function clearPosters(): Promise<void> {}
+
 export async function upsertPoster(
   _imdbId: string,
   _remoteUrl: string | null,

@@ -1,13 +1,17 @@
 import { Directory, File, Paths } from 'expo-file-system';
 import { useEffect, useState } from 'react';
 import { Platform } from 'react-native';
-import { getPoster, upsertPoster } from './db';
+import { clearPosters, getMeta, getPoster, setMeta, upsertPoster } from './db';
 import { isSeriesItem, type CatalogItem } from './types';
+import { WEB_DEV_PROXY_PORT } from './webProxy';
 
 export const POSTER_USER_AGENT =
-  'MrDivMovie/1.0.12 (personal Android catalog; Wikipedia poster lookup)';
+  'Mozilla/5.0 (compatible; MrDivMovie/1.0; IMDb poster lookup)';
 
 const MISS_TTL_MS = 1000 * 60 * 60 * 24;
+const POSTER_GEN = '7';
+const FETCH_CONCURRENCY = 6;
+const IMDB_ID_RE = /^tt\d{5,}$/;
 
 export type PosterQuery = {
   imdbId: string;
@@ -19,6 +23,9 @@ export type PosterQuery = {
 
 const memory = new Map<string, string | null>();
 const inflight = new Map<string, Promise<string | null>>();
+let appliedGen: string | null = null;
+let fetchActive = 0;
+const fetchWaiters: Array<() => void> = [];
 
 function normalizeImdbId(raw: string): string {
   return raw.trim().toLowerCase();
@@ -39,174 +46,84 @@ function ensurePosterDir() {
   }
 }
 
-function cleanThumb(url: string): string {
-  return url.replace(/\?.*$/, '');
+function compactPosterUrl(url: string): string {
+  if (!/^https:\/\/m\.media-amazon\.com\//i.test(url)) return url;
+  return url.replace(/\._V1_[^./]*\.(jpe?g|png|webp)$/i, '._V1_UX342.$1');
 }
 
-function firstThumb(data: unknown): string | null {
-  if (!data || typeof data !== 'object') return null;
-  const pages = (data as { query?: { pages?: Record<string, unknown> } }).query
-    ?.pages;
-  if (pages) {
-    const rows = Object.values(pages) as Array<{
-      index?: number;
-      thumbnail?: { source?: string };
-    }>;
-    rows.sort((a, b) => (a.index ?? 99) - (b.index ?? 99));
-    for (const row of rows) {
-      const src = row.thumbnail?.source;
-      if (typeof src === 'string' && src.startsWith('https://')) {
-        return cleanThumb(src);
-      }
-    }
+/** Web: same-origin (or local sidecar) image proxy — browser never hits IMDb JSON. */
+function webPosterImageUrl(imdbId: string): string {
+  const rel = `/api/poster-image?id=${encodeURIComponent(imdbId)}`;
+  if (
+    typeof __DEV__ !== 'undefined' &&
+    __DEV__ &&
+    typeof window !== 'undefined'
+  ) {
+    const { protocol, hostname } = window.location;
+    return `${protocol}//${hostname}:${WEB_DEV_PROXY_PORT}${rel}`;
   }
-  const src = (data as { thumbnail?: { source?: string } }).thumbnail?.source;
-  if (typeof src === 'string' && src.startsWith('https://')) {
-    return cleanThumb(src);
-  }
-  return null;
+  return rel;
 }
 
-async function fetchJson(url: string): Promise<unknown> {
+function suggestionUrl(imdbId: string): string {
+  const first = imdbId[0] || 't';
+  return `https://v2.sg.media-imdb.com/suggestion/${first}/${imdbId}.json`;
+}
+
+async function acquireFetchSlot() {
+  if (fetchActive >= FETCH_CONCURRENCY) {
+    await new Promise<void>((resolve) => {
+      fetchWaiters.push(resolve);
+    });
+  }
+  fetchActive += 1;
+}
+
+function releaseFetchSlot() {
+  fetchActive = Math.max(0, fetchActive - 1);
+  fetchWaiters.shift()?.();
+}
+
+async function lookupImdbPosterUrl(imdbId: string): Promise<string | null> {
+  await acquireFetchSlot();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 12_000);
   try {
-    const response = await fetch(url, {
+    const response = await fetch(suggestionUrl(imdbId), {
       headers: {
         Accept: 'application/json',
         'User-Agent': POSTER_USER_AGENT,
-        'Api-User-Agent': POSTER_USER_AGENT,
       },
       signal: controller.signal,
     });
     if (!response.ok) throw new Error(`HTTP_${response.status}`);
-    return await response.json();
+    const data = (await response.json()) as {
+      d?: Array<{ id?: string; i?: { imageUrl?: string } }>;
+    };
+    const rows = Array.isArray(data.d) ? data.d : [];
+    const hit =
+      rows.find((row) => normalizeImdbId(row.id || '') === imdbId) || rows[0];
+    const imageUrl = hit?.i?.imageUrl;
+    if (typeof imageUrl !== 'string' || !imageUrl.startsWith('https://')) {
+      return null;
+    }
+    return compactPosterUrl(imageUrl);
   } finally {
     clearTimeout(timer);
+    releaseFetchSlot();
   }
-}
-
-function wikiSearchUrl(host: string, query: string): string {
-  return (
-    `https://${host}/w/api.php?` +
-    new URLSearchParams({
-      action: 'query',
-      format: 'json',
-      origin: '*',
-      generator: 'search',
-      gsrsearch: query,
-      gsrlimit: '5',
-      gsrnamespace: '0',
-      prop: 'pageimages',
-      piprop: 'thumbnail',
-      pithumbsize: '420',
-    }).toString()
-  );
-}
-
-function wikiSummaryUrl(host: string, title: string): string {
-  const path = encodeURIComponent(title.trim().replace(/\s+/g, '_'));
-  return `https://${host}/api/rest_v1/page/summary/${path}`;
-}
-
-async function lookupWikidataSitelink(imdbId: string): Promise<string | null> {
-  const search = (await fetchJson(
-    'https://www.wikidata.org/w/api.php?' +
-      new URLSearchParams({
-        action: 'query',
-        format: 'json',
-        origin: '*',
-        list: 'search',
-        srlimit: '1',
-        srsearch: `haswbstatement:P345=${imdbId}`,
-      }).toString(),
-  )) as { query?: { search?: { title?: string }[] } } | null;
-  const qid = search?.query?.search?.[0]?.title?.trim();
-  if (!qid || !/^Q\d+$/i.test(qid)) return null;
-
-  const payload = (await fetchJson(
-    'https://www.wikidata.org/w/api.php?' +
-      new URLSearchParams({
-        action: 'wbgetentities',
-        format: 'json',
-        origin: '*',
-        ids: qid,
-        props: 'sitelinks',
-        sitefilter: 'enwiki|fawiki',
-      }).toString(),
-  )) as {
-    entities?: Record<
-      string,
-      { sitelinks?: Record<string, { title?: string }> }
-    >;
-  } | null;
-  const links = payload?.entities?.[qid]?.sitelinks;
-  const titles = [
-    { host: 'en.wikipedia.org', title: links?.enwiki?.title },
-    { host: 'fa.wikipedia.org', title: links?.fawiki?.title },
-  ];
-  for (const item of titles) {
-    if (!item.title) continue;
-    const thumb = firstThumb(await fetchJson(wikiSummaryUrl(item.host, item.title)));
-    if (thumb) return thumb;
-  }
-  return null;
 }
 
 async function lookupRemotePoster(query: PosterQuery): Promise<string | null> {
-  const kindFa = query.isSeries ? 'مجموعه تلویزیونی' : 'فیلم';
-  const kindEn = query.isSeries ? 'TV series' : 'film';
-  const titleFa = query.titleFa?.trim() ?? '';
-  const title = query.title.trim();
-  const year = query.year;
+  const imdbId = normalizeImdbId(query.imdbId);
+  if (!IMDB_ID_RE.test(imdbId)) return null;
 
-  try {
-    const fromWikidata = await lookupWikidataSitelink(query.imdbId);
-    if (fromWikidata) return fromWikidata;
-  } catch {
-    // Fall through to Wikipedia title search.
+  // Web loads through our proxy so CORS / Iran Amazon blocks do not blank the grid.
+  if (Platform.OS === 'web') {
+    return webPosterImageUrl(imdbId);
   }
 
-  const attempts: Array<{ host: string; q: string; rest?: boolean }> = [];
-  if (title) {
-    attempts.push({
-      host: 'en.wikipedia.org',
-      q: `${title} (${kindEn})`,
-      rest: true,
-    });
-    if (query.isSeries) {
-      attempts.push({
-        host: 'en.wikipedia.org',
-        q: `${title} (anime)`,
-        rest: true,
-      });
-    }
-    attempts.push({
-      host: 'en.wikipedia.org',
-      q: `${title} ${kindEn}${year ? ` ${year}` : ''}`,
-    });
-  }
-  if (titleFa) {
-    attempts.push({ host: 'fa.wikipedia.org', q: `${titleFa} ${kindFa}` });
-    attempts.push({ host: 'fa.wikipedia.org', q: titleFa, rest: true });
-  }
-
-  const seen = new Set<string>();
-  for (const attempt of attempts) {
-    const key = `${attempt.host}|${attempt.q}|${attempt.rest ? 'r' : 's'}`;
-    if (!attempt.q.trim() || seen.has(key)) continue;
-    seen.add(key);
-    try {
-      const url = attempt.rest
-        ? wikiSummaryUrl(attempt.host, attempt.q)
-        : wikiSearchUrl(attempt.host, attempt.q);
-      const thumb = firstThumb(await fetchJson(url));
-      if (thumb) return thumb;
-    } catch {
-      // Keep trying other titles/hosts.
-    }
-  }
-  return null;
+  return lookupImdbPosterUrl(imdbId);
 }
 
 async function cachePosterFile(
@@ -222,6 +139,7 @@ async function cachePosterFile(
       headers: {
         Accept: 'image/*',
         'User-Agent': POSTER_USER_AGENT,
+        Referer: 'https://www.imdb.com/',
       },
     });
     return file.exists ? file.uri : dest.exists ? dest.uri : null;
@@ -239,9 +157,17 @@ function usableFileUri(uri: string | null | undefined): string | null {
   }
 }
 
+function bumpPosterGen() {
+  if (appliedGen === POSTER_GEN) return;
+  memory.clear();
+  inflight.clear();
+  appliedGen = POSTER_GEN;
+}
+
 export async function getPosterUrl(query: PosterQuery): Promise<string | null> {
   const imdbId = normalizeImdbId(query.imdbId);
-  if (!/^tt\d{5,}$/.test(imdbId)) return null;
+  if (!IMDB_ID_RE.test(imdbId)) return null;
+  bumpPosterGen();
   if (memory.has(imdbId)) return memory.get(imdbId) ?? null;
 
   const pending = inflight.get(imdbId);
@@ -249,6 +175,13 @@ export async function getPosterUrl(query: PosterQuery): Promise<string | null> {
 
   const request = (async () => {
     try {
+      if (Platform.OS !== 'web') {
+        const gen = await getMeta('poster_gen');
+        if (gen !== POSTER_GEN) {
+          await clearPosters();
+          await setMeta('poster_gen', POSTER_GEN);
+        }
+      }
       const stored = await getPoster(imdbId);
       const local = usableFileUri(stored?.fileUri);
       if (local) {
@@ -256,15 +189,25 @@ export async function getPosterUrl(query: PosterQuery): Promise<string | null> {
         return local;
       }
       if (stored?.remoteUrl) {
-        const fileUri = await cachePosterFile(imdbId, stored.remoteUrl);
-        const next = fileUri ?? stored.remoteUrl;
-        memory.set(imdbId, next);
-        if (fileUri) {
-          await upsertPoster(imdbId, stored.remoteUrl, fileUri);
+        // Skip stale Wikipedia / other hosts after switching to IMDb.
+        const isImdbHost =
+          /media-amazon\.com/i.test(stored.remoteUrl) ||
+          /\/api\/poster-image\?/i.test(stored.remoteUrl);
+        if (isImdbHost) {
+          const fileUri = await cachePosterFile(imdbId, stored.remoteUrl);
+          const next = fileUri ?? stored.remoteUrl;
+          memory.set(imdbId, next);
+          if (fileUri) {
+            await upsertPoster(imdbId, stored.remoteUrl, fileUri);
+          }
+          return next;
         }
-        return next;
       }
-      if (stored && !stored.remoteUrl && Date.now() - stored.updatedAt < MISS_TTL_MS) {
+      if (
+        stored &&
+        !stored.remoteUrl &&
+        Date.now() - stored.updatedAt < MISS_TTL_MS
+      ) {
         memory.set(imdbId, null);
         return null;
       }
@@ -281,7 +224,6 @@ export async function getPosterUrl(query: PosterQuery): Promise<string | null> {
       await upsertPoster(imdbId, remote, fileUri);
       return next;
     } catch {
-      memory.set(imdbId, null);
       return null;
     } finally {
       inflight.delete(imdbId);
@@ -299,17 +241,29 @@ export function usePosterUrl(item: CatalogItem): string | null {
 
   useEffect(() => {
     let cancelled = false;
-    void getPosterUrl({
+    let attempt = 0;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    const query = {
       imdbId: item.imdbId,
       title: item.title,
       titleFa: item.titleFa,
       year: item.year,
       isSeries: isSeriesItem(item),
-    }).then((next) => {
-      if (!cancelled) setUrl(next);
-    });
+    };
+    const run = () => {
+      void getPosterUrl(query).then((next) => {
+        if (cancelled) return;
+        setUrl(next);
+        if (!next && attempt < 3) {
+          attempt += 1;
+          retryTimer = setTimeout(run, 800 * attempt);
+        }
+      });
+    };
+    run();
     return () => {
       cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
     };
   }, [item.imdbId, item.title, item.titleFa, item.year, item.type]);
 

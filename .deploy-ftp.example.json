@@ -1,0 +1,8 @@
+{
+  "host": "ftp.mr-div.ir",
+  "port": 21,
+  "user": "uiraukiw",
+  "password": "",
+  "remoteDir": "/movie.mr-div.ir",
+  "localDir": "host"
+}

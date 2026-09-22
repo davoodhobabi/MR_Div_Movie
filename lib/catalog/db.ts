@@ -162,6 +162,11 @@ export async function getPoster(imdbId: string): Promise<PosterRow | null> {
   };
 }
 
+export async function clearPosters(): Promise<void> {
+  const db = await openCatalogDb();
+  await db.execAsync('DELETE FROM posters');
+}
+
 export async function upsertPoster(
   imdbId: string,
   remoteUrl: string | null,
