@@ -122,6 +122,13 @@ function readElement(buf: Bytes) {
   }
 }
 
+let rewriteRequestUrl = (url: string) => url;
+
+/** Web-only: send Range reads through a same-origin proxy that can reach the CDN. */
+export function setMkvRequestUrlRewriter(fn: (url: string) => string) {
+  rewriteRequestUrl = fn;
+}
+
 async function fetchRange(
   url: string,
   start: number,
@@ -129,7 +136,7 @@ async function fetchRange(
   signal?: AbortSignal,
 ): Promise<Uint8Array> {
   const end = start + Math.max(1, length) - 1;
-  const response = await fetch(url, {
+  const response = await fetch(rewriteRequestUrl(url), {
     method: 'GET',
     headers: { Range: `bytes=${start}-${end}` },
     signal,

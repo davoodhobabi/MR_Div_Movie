@@ -1,10 +1,16 @@
 import type { VideoPlayer as ExpoVideoPlayer, SubtitleTrack } from 'expo-video';
+import { Platform } from 'react-native';
 import { webCatalogApiUrl } from '../catalog/webProxy';
 import { pickPreferredSubtitle } from './subtitlePicker';
 import {
   extractMkvTextSubtitles,
+  setMkvRequestUrlRewriter,
   type ExtractedSubtitleTrack,
 } from './mkvSubtitles';
+
+if (Platform.OS === 'web') {
+  setMkvRequestUrlRewriter((url) => webCatalogApiUrl('/api/media-range', url));
+}
 
 const trackCache = new Map<string, Promise<ExtractedSubtitleTrack[]>>();
 
@@ -406,15 +412,22 @@ function tracksFor(videoUrl: string, signal?: AbortSignal): Promise<ExtractedSub
   const cached = trackCache.get(videoUrl);
   if (cached) return cached;
   const pending = (async () => {
-    const fetchUrl = await resolveFetchableMediaUrl(videoUrl, signal);
-    if (isMkvUrl(fetchUrl) || isMkvUrl(videoUrl)) {
-      const extracted = await extractMkvTextSubtitles(fetchUrl);
+    // Catalog hosts have no CORS; Range reads go through /api/media-range.
+    if (isMkvUrl(videoUrl)) {
+      const extracted = await extractMkvTextSubtitles(videoUrl, signal);
+      if (extracted.length) return extracted;
+    }
+    const fetchUrl = await resolveFetchableMediaUrl(videoUrl, signal).catch(
+      () => videoUrl,
+    );
+    if (fetchUrl !== videoUrl && isMkvUrl(fetchUrl)) {
+      const extracted = await extractMkvTextSubtitles(fetchUrl, signal);
       if (extracted.length) return extracted;
     }
     const sidecar = await loadSidecarTracks(fetchUrl);
     if (sidecar.length) return sidecar;
     if (!isMkvUrl(fetchUrl) && !isMkvUrl(videoUrl)) {
-      return extractMkvTextSubtitles(fetchUrl);
+      return extractMkvTextSubtitles(fetchUrl, signal);
     }
     return [];
   })().catch((err) => {
