@@ -4,6 +4,12 @@
   "devCommand": "expo",
   "cleanUrls": true,
   "framework": null,
+  "functions": {
+    "api/subtitles.js": { "maxDuration": 60 },
+    "api/media-range.js": { "maxDuration": 30 },
+    "api/media-resolve.js": { "maxDuration": 30 },
+    "api/folder-listing.js": { "maxDuration": 30 }
+  },
   "rewrites": [
     {
       "source": "/((?!api/).*)",

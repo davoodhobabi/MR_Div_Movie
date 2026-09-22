@@ -408,12 +408,32 @@ function isMkvUrl(url: string) {
   return /\.mkv(?:$|\?)/i.test(url);
 }
 
+async function loadHostTracks(
+  videoUrl: string,
+  signal?: AbortSignal,
+): Promise<ExtractedSubtitleTrack[]> {
+  const response = await fetch(webCatalogApiUrl('/api/subtitles', videoUrl), {
+    method: 'GET',
+    signal,
+  });
+  if (!response.ok) throw new Error(`HTTP_${response.status}`);
+  const data = (await response.json()) as { tracks?: ExtractedSubtitleTrack[] };
+  const tracks = Array.isArray(data?.tracks) ? data.tracks : [];
+  return tracks.filter(
+    (track) =>
+      track &&
+      typeof track.vtt === 'string' &&
+      track.vtt.includes('-->'),
+  );
+}
+
 function tracksFor(videoUrl: string, signal?: AbortSignal): Promise<ExtractedSubtitleTrack[]> {
   const cached = trackCache.get(videoUrl);
   if (cached) return cached;
   const pending = (async () => {
-    // Catalog hosts have no CORS; Range reads go through /api/media-range.
     if (isMkvUrl(videoUrl)) {
+      const hosted = await loadHostTracks(videoUrl, signal).catch(() => []);
+      if (hosted.length) return hosted;
       const extracted = await extractMkvTextSubtitles(videoUrl, signal);
       if (extracted.length) return extracted;
     }
