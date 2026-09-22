@@ -2,13 +2,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Pressable,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
 import { EditionDivider } from './EditionDivider';
 import { Glass } from './Glass';
+import { TvPressable } from './TvPressable';
 import { strings } from '../constants/strings';
 import { colors, fonts, radii, spacing } from '../constants/theme';
 import { fetchFolderListing } from '../lib/catalog/fetchFolderListing';
@@ -157,12 +157,12 @@ export function SeriesPicker({
               : strings.pickEpisode}
         </Text>
         {step !== 'season' ? (
-          <Pressable onPress={goBack} hitSlop={8}>
+          <TvPressable onPress={goBack} hitSlop={8}>
             <Glass {...ltrProps} style={[styles.backBtn, ltrStyle]}>
               <Ionicons name="arrow-undo" size={16} color={colors.textMuted} />
               <Text style={styles.backText}>{strings.backStep}</Text>
             </Glass>
-          </Pressable>
+          </TvPressable>
         ) : null}
       </View>
 
@@ -180,7 +180,7 @@ export function SeriesPicker({
           {seasons.map((entry) => {
             const active = entry.season === seasonNumber;
             return (
-              <Pressable
+              <TvPressable
                 key={entry.season}
                 onPress={() => selectSeason(entry.season)}
               >
@@ -194,7 +194,7 @@ export function SeriesPicker({
                     {strings.seasonLabel(entry.season)}
                   </Text>
                 </Glass>
-              </Pressable>
+              </TvPressable>
             );
           })}
         </View>
@@ -211,7 +211,7 @@ export function SeriesPicker({
               <View key={edition} style={styles.editionGroup}>
                 <EditionDivider edition={edition} />
                 {items.map((option, index) => (
-                  <Pressable
+                  <TvPressable
                     key={`${option.edition}-${option.quality}-${index}`}
                     onPress={() => selectQuality(option)}
                     style={({ pressed }) => [pressed && styles.pressed]}
@@ -240,7 +240,7 @@ export function SeriesPicker({
                       </Text>
                     </View>
                     </Glass>
-                  </Pressable>
+                  </TvPressable>
                 ))}
               </View>
             );
@@ -259,11 +259,11 @@ export function SeriesPicker({
             <Glass style={styles.stateBox}>
               <Text style={styles.errorText}>{strings.folderError(error)}</Text>
               {quality ? (
-                <Pressable onPress={retryEpisodes}>
+                <TvPressable onPress={retryEpisodes}>
                   <Glass style={styles.retryBtn}>
                     <Text style={styles.retryText}>{strings.retryFetch}</Text>
                   </Glass>
-                </Pressable>
+                </TvPressable>
               ) : null}
             </Glass>
           ) : (
@@ -290,7 +290,7 @@ export function SeriesPicker({
                     ]}
                   >
                     <View style={styles.actions}>
-                      <Pressable
+                      <TvPressable
                         onPress={
                           ready && quality
                             ? () => onPlayEpisode(episode, quality)
@@ -311,8 +311,8 @@ export function SeriesPicker({
                           size={18}
                           color={accent}
                         />
-                      </Pressable>
-                      <Pressable
+                      </TvPressable>
+                      <TvPressable
                         onPress={
                           ready && quality
                             ? () => onDownloadEpisode(episode, quality)
@@ -332,7 +332,7 @@ export function SeriesPicker({
                           size={18}
                           color={accent}
                         />
-                      </Pressable>
+                      </TvPressable>
                     </View>
                     <View style={styles.optionCopy}>
                       <Text style={styles.optionTitle} numberOfLines={2}>

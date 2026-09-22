@@ -1,6 +1,6 @@
 {
   "name": "dmovie",
-  "version": "1.0.38",
+  "version": "1.0.40",
   "main": "expo-router/entry",
   "dependencies": {
     "@expo/metro-runtime": "~57.0.15",

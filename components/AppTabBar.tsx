@@ -8,6 +8,7 @@ import { colors, fonts, radii, spacing } from '../constants/theme';
 import { TabBarBlurTargetContext } from '../context/GlassContext';
 import { useLayout } from '../lib/layout';
 import { ltrProps, ltrStyle } from '../lib/rtl';
+import { useIsTv, useTvFocus } from '../lib/tv';
 
 type TabRoute = { key: string; name: string };
 
@@ -91,6 +92,7 @@ function BottomGlow({ width, height, id }: { width: number; height: number; id: 
 export function AppTabBar({ state, navigation, insets }: TabBarProps) {
   const tabBarBlur = useContext(TabBarBlurTargetContext);
   const { isTablet, gutter } = useLayout();
+  const isTv = useIsTv();
 
   return (
     <View
@@ -99,7 +101,7 @@ export function AppTabBar({ state, navigation, insets }: TabBarProps) {
         styles.root,
         {
           paddingHorizontal: gutter,
-          paddingBottom: insets.bottom + spacing.lg,
+          paddingBottom: insets.bottom + (isTv ? spacing.md : spacing.lg),
         },
       ]}
     >
@@ -111,7 +113,7 @@ export function AppTabBar({ state, navigation, insets }: TabBarProps) {
         blurMethod="dimezisBlurView"
         blurReductionFactor={2}
         blurTarget={tabBarBlur?.target ?? undefined}
-        style={[styles.bar, isTablet && styles.barWide]}
+        style={[styles.bar, (isTablet || isTv) && styles.barWide]}
       >
         <View pointerEvents="none" style={styles.tint} />
         <View {...ltrProps} style={[styles.row, ltrStyle]}>
@@ -162,17 +164,23 @@ function TabItem({
   onPress: () => void;
 }) {
   const [size, setSize] = useState({ width: 0, height: 0 });
+  const tvFocus = useTvFocus();
 
   return (
     <Pressable
       onPress={onPress}
+      {...tvFocus.props}
       onLayout={(event) => {
         const { width, height } = event.nativeEvent.layout;
         if (width !== size.width || height !== size.height) {
           setSize({ width, height });
         }
       }}
-      style={({ pressed }) => [styles.item, pressed && styles.itemPressed]}
+      style={({ pressed }) => [
+        styles.item,
+        pressed && styles.itemPressed,
+        tvFocus.style,
+      ]}
       accessibilityRole="button"
       accessibilityState={{ selected: focused }}
       accessibilityLabel={label}

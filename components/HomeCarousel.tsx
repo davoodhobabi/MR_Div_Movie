@@ -1,11 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import type { ReactNode } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { strings } from '../constants/strings';
 import { colors, fonts, radii, spacing } from '../constants/theme';
 import { useLayout } from '../lib/layout';
 import { ltrProps, ltrStyle } from '../lib/rtl';
 import { Glass } from './Glass';
+import { TvPressable } from './TvPressable';
 
 type HomeCarouselProps = {
   title: string;
@@ -28,7 +29,7 @@ export function HomeCarousel({
   emptyTitle,
   emptyHint,
 }: HomeCarouselProps) {
-  const { isDesktop, gutter, gridGap } = useLayout();
+  const { isDesktop, isTv, gutter, gridGap } = useLayout();
   return (
     <View style={styles.section}>
       <View style={[styles.header, { paddingHorizontal: gutter }]}>
@@ -37,7 +38,7 @@ export function HomeCarousel({
           <Text style={styles.title}>{title}</Text>
         </View>
         {onSeeAll ? (
-          <Pressable
+          <TvPressable
             onPress={onSeeAll}
             hitSlop={8}
             style={({ pressed }) => [styles.seeAll, pressed && styles.pressed]}
@@ -46,7 +47,7 @@ export function HomeCarousel({
           >
             <Text style={styles.seeAllText}>{strings.seeAll}</Text>
             <Ionicons name="chevron-back" size={14} color={colors.textMuted} />
-          </Pressable>
+          </TvPressable>
         ) : null}
       </View>
 
@@ -58,7 +59,7 @@ export function HomeCarousel({
           {emptyTitle ? <Text style={styles.emptyTitle}>{emptyTitle}</Text> : null}
           {emptyHint ? <Text style={styles.emptyHint}>{emptyHint}</Text> : null}
         </Glass>
-      ) : isDesktop ? (
+      ) : isDesktop || isTv ? (
           <View {...ltrProps} style={[styles.grid, ltrStyle, { paddingHorizontal: gutter, gap: gridGap }]}>
             {children}
           </View>

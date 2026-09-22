@@ -2,7 +2,7 @@
   "expo": {
     "name": "MrDiv_Movie",
     "slug": "DMovie",
-    "version": "1.0.38",
+    "version": "1.0.40",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "dmovie",
@@ -27,13 +27,14 @@
     },
     "android": {
       "package": "com.dmovie.app",
-      "versionCode": 10038,
+      "versionCode": 10040,
       "adaptiveIcon": {
         "backgroundColor": "#000000",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
+      "banner": "./assets/tv-banner.png",
       "predictiveBackGestureEnabled": false
     },
     "web": {
@@ -56,6 +57,7 @@
       "./plugins/withFfmpegDecoders.js",
       "./plugins/withOkHttpUserAgent.js",
       "./plugins/withAndroidNavInset.js",
+      "./plugins/withAndroidTv.js",
       "expo-build-properties",
       "expo-sqlite",
       [

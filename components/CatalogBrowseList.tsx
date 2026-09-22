@@ -33,7 +33,7 @@ export function CatalogBrowseList({
   const { isFavorite, toggleFavorite } = useCatalog();
   const [query, setQuery] = useState('');
   const tabBarPad = useFloatingTabBarPadding();
-  const { width, gutter, columns, gridGap } = useLayout();
+  const { width, gutter, columns, gridGap, isTv } = useLayout();
   const cardWidth = Math.floor(
     PixelRatio.roundToNearestPixel(
       (width - gutter * 2 - gridGap * (columns - 1)) / columns,
@@ -87,7 +87,7 @@ export function CatalogBrowseList({
         initialNumToRender={columns * 4}
         windowSize={5}
         maxToRenderPerBatch={columns * 4}
-        removeClippedSubviews
+        removeClippedSubviews={!isTv}
         renderItem={({ item }) => (
           <HomeTitleCard
             item={item}

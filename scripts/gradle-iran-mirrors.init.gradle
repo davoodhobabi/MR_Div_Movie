@@ -1,0 +1,38 @@
+/**
+ * Prefer reachable Maven mirrors when Google Maven is blocked.
+ * Keep public/central first so Central artifacts are not fetched from the Google mirror.
+ */
+settingsEvaluated { settings ->
+  settings.pluginManagement.repositories {
+    maven { url = uri("https://maven.aliyun.com/repository/public") }
+    maven { url = uri("https://maven.aliyun.com/repository/central") }
+    maven { url = uri("https://maven.aliyun.com/repository/gradle-plugin") }
+    maven { url = uri("https://maven.aliyun.com/repository/google") }
+    maven { url = uri("https://repo.huaweicloud.com/repository/maven") }
+    mavenCentral()
+    google()
+    gradlePluginPortal()
+  }
+}
+
+allprojects {
+  buildscript {
+    repositories {
+      maven { url "https://maven.aliyun.com/repository/public" }
+      maven { url "https://maven.aliyun.com/repository/central" }
+      maven { url "https://maven.aliyun.com/repository/google" }
+      maven { url "https://repo.huaweicloud.com/repository/maven" }
+      mavenCentral()
+      google()
+    }
+  }
+  repositories {
+    maven { url "https://maven.aliyun.com/repository/public" }
+    maven { url "https://maven.aliyun.com/repository/central" }
+    maven { url "https://maven.aliyun.com/repository/google" }
+    maven { url "https://repo.huaweicloud.com/repository/maven" }
+    mavenCentral()
+    google()
+    maven { url "https://www.jitpack.io" }
+  }
+}

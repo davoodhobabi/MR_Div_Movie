@@ -1,11 +1,13 @@
 import '../lib/rtl';
 import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
+import * as ScreenOrientation from 'expo-screen-orientation';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native';
 import { colors, fonts } from '../constants/theme';
 import { CatalogProvider } from '../context/CatalogContext';
+import { isAndroidTv } from '../lib/tv';
 
 function AppShell() {
   return (
@@ -44,6 +46,17 @@ export default function RootLayout() {
     [fonts.medium]: require('../assets/fonts/IRANSansXNoEn-Medium.ttf'),
     [fonts.bold]: require('../assets/fonts/IRANSansXNoEn-Bold.ttf'),
   });
+
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    if (isAndroidTv()) {
+      void ScreenOrientation.unlockAsync();
+      return;
+    }
+    void ScreenOrientation.lockAsync(
+      ScreenOrientation.OrientationLock.PORTRAIT_UP,
+    );
+  }, []);
 
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;

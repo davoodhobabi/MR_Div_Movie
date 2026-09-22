@@ -5,6 +5,7 @@ import { colors, fonts, radii, spacing } from '../constants/theme';
 import { formatFileSizeLabel, formatQualityLabel } from '../lib/catalog/qualityLabel';
 import type { CatalogEdition, CatalogSource } from '../lib/catalog/types';
 import { ltrProps, ltrStyle } from '../lib/rtl';
+import { useTvFocus } from '../lib/tv';
 import { Glass } from './Glass';
 
 const EDITION_COLOR: Record<CatalogEdition, string> = {
@@ -32,6 +33,8 @@ export function SourceButton({
   const sizeLabel = source.size.trim()
     ? formatFileSizeLabel(source.size)
     : strings.sizeUnknown;
+  const playFocus = useTvFocus();
+  const downloadFocus = useTvFocus();
 
   return (
     <Glass
@@ -47,6 +50,7 @@ export function SourceButton({
         <Pressable
           onPress={ready ? onPlay : undefined}
           disabled={!ready}
+          {...playFocus.props}
           accessibilityRole="button"
           accessibilityState={{ selected: active, disabled: !ready }}
           accessibilityLabel={`${strings.tapToPlay} · ${qualityLabel}`}
@@ -54,6 +58,7 @@ export function SourceButton({
             styles.iconWrap,
             { backgroundColor: `${accent}22` },
             pressed && ready && styles.pressed,
+            playFocus.style,
           ]}
         >
           <Ionicons
@@ -65,12 +70,14 @@ export function SourceButton({
         <Pressable
           onPress={ready ? onDownload : undefined}
           disabled={!ready}
+          {...downloadFocus.props}
           accessibilityRole="button"
           accessibilityLabel={`${strings.downloadFile} · ${qualityLabel}`}
           style={({ pressed }) => [
             styles.iconWrap,
             { backgroundColor: `${accent}22` },
             pressed && ready && styles.pressed,
+            downloadFocus.style,
           ]}
         >
           <Ionicons name="download-outline" size={18} color={accent} />

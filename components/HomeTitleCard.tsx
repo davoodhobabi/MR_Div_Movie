@@ -7,6 +7,7 @@ import { colors, fonts, radii } from '../constants/theme';
 import { usePosterUrl } from '../lib/catalog/poster';
 import { isSeriesItem, type CatalogItem } from '../lib/catalog/types';
 import { ltrProps, ltrStyle } from '../lib/rtl';
+import { useIsTv, useTvFocus } from '../lib/tv';
 
 const POSTER_WIDTH = 140;
 const POSTER_ASPECT = 3 / 2;
@@ -64,6 +65,8 @@ export function HomeTitleCard({
     typeof progress === 'number'
       ? Math.round(Math.max(0, Math.min(1, progress)) * 100)
       : null;
+  const isTv = useIsTv();
+  const tvFocus = useTvFocus();
 
   useEffect(() => {
     setPosterFailed(false);
@@ -73,7 +76,8 @@ export function HomeTitleCard({
   return (
     <Pressable
       onPress={onPress}
-      style={({ pressed }) => [pressed && styles.pressed]}
+      {...tvFocus.props}
+      style={({ pressed }) => [pressed && styles.pressed, tvFocus.style]}
       accessibilityRole="button"
     >
       <View
@@ -122,6 +126,7 @@ export function HomeTitleCard({
                 onPress={onRemoveWatching}
                 hitSlop={10}
                 disabled={!onRemoveWatching}
+                focusable={!isTv}
                 style={[styles.mark, styles.markWatch]}
                 accessibilityRole="button"
                 accessibilityLabel={strings.removeFromNowPlayingA11y}
@@ -133,6 +138,7 @@ export function HomeTitleCard({
                 onPress={onToggleFavorite}
                 hitSlop={10}
                 disabled={!onToggleFavorite}
+                focusable={!isTv}
                 style={[styles.mark, styles.markFav]}
                 accessibilityRole={onToggleFavorite ? 'button' : undefined}
               >

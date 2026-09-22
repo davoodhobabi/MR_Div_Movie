@@ -1,8 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Pressable, StyleSheet } from 'react-native';
+import { StyleSheet } from 'react-native';
 import { strings } from '../constants/strings';
 import { colors } from '../constants/theme';
 import { Glass } from './Glass';
+import { TvPressable } from './TvPressable';
 
 type FavoriteButtonProps = {
   favorited: boolean;
@@ -17,7 +18,7 @@ export function FavoriteButton({
 }: FavoriteButtonProps) {
   const iconSize = size === 'sm' ? 20 : 24;
   return (
-    <Pressable
+    <TvPressable
       onPress={onPress}
       hitSlop={10}
       style={({ pressed }) => [pressed && styles.pressed]}
@@ -31,7 +32,7 @@ export function FavoriteButton({
           color={favorited ? colors.accent : colors.text}
         />
       </Glass>
-    </Pressable>
+    </TvPressable>
   );
 }
 

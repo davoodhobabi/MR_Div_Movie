@@ -10,6 +10,7 @@ import {
 import { strings } from '../constants/strings';
 import { colors, fonts, radii, spacing } from '../constants/theme';
 import { Glass } from './Glass';
+import { useTvFocus } from '../lib/tv';
 
 type SearchBarProps = {
   onSubmit: (query: string) => void;
@@ -26,6 +27,7 @@ export function SearchBar({
 }: SearchBarProps) {
   const [value, setValue] = useState(initialValue);
   const [focused, setFocused] = useState(false);
+  const clearFocus = useTvFocus();
 
   const updateValue = (next: string) => {
     setValue(next);
@@ -66,9 +68,10 @@ export function SearchBar({
         <Pressable
           onPress={() => updateValue('')}
           hitSlop={10}
+          {...clearFocus.props}
           accessibilityRole="button"
           accessibilityLabel={strings.clearSearchA11y}
-          style={styles.clear}
+          style={[styles.clear, clearFocus.style]}
         >
           <Ionicons name="close-circle" size={20} color={colors.textMuted} />
         </Pressable>

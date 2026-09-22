@@ -1,11 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useState } from 'react';
-import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFloatingTabBarPadding } from '../../lib/tabBarInset';
 import { BrandLogo } from '../../components/BrandLogo';
 import { Glass } from '../../components/Glass';
 import { SupportGoalBar } from '../../components/SupportGoalBar';
+import { TvPressable } from '../../components/TvPressable';
 import { strings } from '../../constants/strings';
 import { colors, fonts, radii, spacing } from '../../constants/theme';
 import { useCatalog } from '../../context/CatalogContext';
@@ -49,7 +50,7 @@ export default function SettingsScreen() {
             </Text>
           </View>
 
-          <Pressable
+          <TvPressable
             onPress={() => Linking.openURL(strings.telegramChannelUrl)}
             style={({ pressed }) => [pressed && styles.pressed]}
             accessibilityRole="link"
@@ -66,10 +67,10 @@ export default function SettingsScreen() {
               </View>
               <Ionicons name="open-outline" size={16} color={colors.textMuted} />
             </Glass>
-          </Pressable>
+          </TvPressable>
 
           {goal ? (
-            <Pressable
+            <TvPressable
               onPress={() => Linking.openURL(strings.supportMrDivUrl)}
               style={({ pressed }) => [pressed && styles.pressed]}
               accessibilityRole="link"
@@ -83,9 +84,9 @@ export default function SettingsScreen() {
                   <Ionicons name="open-outline" size={14} color={colors.textMuted} />
                 </View>
               </Glass>
-            </Pressable>
+            </TvPressable>
           ) : (
-            <Pressable
+            <TvPressable
               onPress={() => Linking.openURL(strings.supportMrDivUrl)}
               style={({ pressed }) => [pressed && styles.pressed]}
               accessibilityRole="link"
@@ -96,7 +97,7 @@ export default function SettingsScreen() {
                 <Text style={styles.supportText}>{strings.supportMrDiv}</Text>
                 <Ionicons name="open-outline" size={14} color={colors.textMuted} />
               </Glass>
-            </Pressable>
+            </TvPressable>
           )}
         </ScrollView>
       </SafeAreaView>

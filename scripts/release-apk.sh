@@ -107,21 +107,76 @@ if [[ "$DO_BUILD" -eq 0 ]]; then
   exit 0
 fi
 
+# Also patch nested Expo/RN composite plugin settings so AGP resolves when Google Maven is blocked.
+node - <<'NODE'
+const fs = require('fs');
+const path = require('path');
+const roots = [
+  'node_modules/expo-modules-autolinking/android/expo-gradle-plugin/settings.gradle.kts',
+  'node_modules/expo-modules-core/expo-module-gradle-plugin/settings.gradle.kts',
+  'node_modules/expo-dev-launcher/expo-dev-launcher-gradle-plugin/settings.gradle.kts',
+];
+const mirrorBlock = `pluginManagement {
+  repositories {
+    maven { url = uri("https://maven.aliyun.com/repository/public") }
+    maven { url = uri("https://maven.aliyun.com/repository/central") }
+    maven { url = uri("https://maven.aliyun.com/repository/gradle-plugin") }
+    maven {
+      url = uri("https://maven.aliyun.com/repository/google")
+      content {
+        includeGroupByRegex("com\\\\.android.*")
+        includeGroupByRegex("androidx.*")
+        includeGroupByRegex("com\\\\.google\\\\.android.*")
+        includeGroupByRegex("com\\\\.google\\\\.testing.*")
+        includeGroupByRegex("com\\\\.google\\\\.gms.*")
+        includeGroupByRegex("com\\\\.google\\\\.firebase.*")
+      }
+    }
+    mavenCentral()
+    google()
+    gradlePluginPortal()
+  }
+}`;
+for (const rel of roots) {
+  const file = path.join(process.cwd(), rel);
+  if (!fs.existsSync(file)) continue;
+  let text = fs.readFileSync(file, 'utf8');
+  // Always rewrite so retries get the filtered google mirror.
+  if (!text.includes('pluginManagement')) {
+    console.log('[mirrors] skip (no pluginManagement)', rel);
+    continue;
+  }
+  text = text.replace(/pluginManagement\s*\{[\s\S]*?\n\}/, mirrorBlock);
+  fs.writeFileSync(file, text);
+  console.log('[mirrors] patched', rel);
+}
+NODE
+
 export JAVA_HOME="${JAVA_HOME:-$HOME/.local/jdk-17/Contents/Home}"
 export ANDROID_HOME="${ANDROID_HOME:-$HOME/Library/Android/sdk}"
 export ANDROID_SDK_ROOT="$ANDROID_HOME"
-export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
+export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$PATH"
 
 node scripts/patch-expo-video-ffmpeg.js
 printf 'sdk.dir=%s\n' "$ANDROID_HOME" > android/local.properties
 
+VERSION="$(node -e "console.log(require('./app.json').expo.version)")"
+VERSION_CODE="$(node -e "console.log(require('./app.json').expo.android.versionCode)")"
+echo "==> version $VERSION (code $VERSION_CODE)"
+perl -i -pe "s/versionCode\\s+\\d+/versionCode $VERSION_CODE/" android/app/build.gradle
+perl -i -pe "s/versionName\\s+\\\"[^\\\"]+\\\"/versionName \\\"$VERSION\\\"/" android/app/build.gradle
+
 (
   cd android
-  ./gradlew assembleRelease --no-daemon
+  ./gradlew assembleRelease --no-daemon \
+    -I "$ROOT/scripts/gradle-iran-mirrors.init.gradle"
 )
 
 APK_SRC="android/app/build/outputs/apk/release/app-release.apk"
 APK_DST="$HOME/Desktop/MrDiv_Movie-${VERSION}.apk"
 cp "$APK_SRC" "$APK_DST"
 ls -lh "$APK_SRC" "$APK_DST"
-echo "DONE_RELEASE $APK_DST"
+adb devices -l
+adb install -r "$APK_SRC"
+adb shell monkey -p com.dmovie.app -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 || true
+echo "INSTALLED $APK_DST"

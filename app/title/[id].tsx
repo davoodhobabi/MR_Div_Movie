@@ -1,25 +1,25 @@
-import { Ionicons } from '@expo/vector-icons';
-import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Image,
   Linking,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { EditionDivider } from '../../components/EditionDivider';
 import { Glass } from '../../components/Glass';
 import { SeriesPicker } from '../../components/SeriesPicker';
 import { SourceButton } from '../../components/SourceButton';
+import { TvPressable } from '../../components/TvPressable';
 import { strings } from '../../constants/strings';
 import { colors, fonts, radii, spacing } from '../../constants/theme';
 import { useCatalog } from '../../context/CatalogContext';
 import { GlassScreen } from '../../context/GlassContext';
+import { usePosterUrl } from '../../lib/catalog/poster';
 import { useLayout } from '../../lib/layout';
 import { ltrProps, ltrStyle } from '../../lib/rtl';
 import { encodeMediaUrl } from '../../lib/catalog/videoSource';
@@ -31,9 +31,13 @@ import {
   type FolderEpisode,
   type SeriesQualityOption,
 } from '../../lib/catalog/types';
+import { Ionicons } from '@expo/vector-icons';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import VideoPlayer from '../../components/VideoPlayer';
 
-// Lazy so a player/native import failure cannot take down the title route itself.
-const VideoPlayer = lazy(() => import('../../components/VideoPlayer'));
+// Keep player behind Suspense for loading fallback; static import avoids Metro HMR
+// breaking dynamic chunk ids on web (`Requiring unknown module`).
 
 function groupSources(sources: CatalogSource[]) {
   return CATALOG_EDITIONS.map((edition) => ({
@@ -55,7 +59,7 @@ function paramString(value: string | string[] | undefined): string | undefined {
 function WebTitleBackButton() {
   const router = useRouter();
   return (
-    <Pressable
+    <TvPressable
       onPress={() => {
         if (router.canGoBack()) router.back();
         else router.replace('/(tabs)');
@@ -66,7 +70,7 @@ function WebTitleBackButton() {
       style={styles.webBackBtn}
     >
       <Ionicons name="chevron-forward" size={28} color={colors.text} />
-    </Pressable>
+    </TvPressable>
   );
 }
 
@@ -95,11 +99,40 @@ export default function TitleScreen() {
   const favorited = item ? isFavorite(item.imdbId) : false;
   const [playback, setPlayback] = useState<ActivePlayback | null>(null);
   const [playerFullscreen, setPlayerFullscreen] = useState(false);
+  const [posterFailed, setPosterFailed] = useState(false);
   const resumeStarted = useRef(false);
   const scrollRef = useRef<ScrollView>(null);
-  const { width: windowWidth, isTablet, gutter } = useLayout();
+  const { width: windowWidth, height: windowHeight, isTablet, isDesktop, gutter } =
+    useLayout();
   // Leave room for the back button without crushing the two-line title.
   const navTitleWidth = Math.max(160, windowWidth - 120);
+  const posterUrl = usePosterUrl(
+    item ?? {
+      index: 0,
+      title: '',
+      imdbId: id && /^tt\d/i.test(id) ? id : 'tt0000000',
+      type: 'movie',
+      imdbVotes: null,
+      imdbRating: null,
+      urls: [],
+    },
+  );
+  const showPoster = Boolean(posterUrl) && !posterFailed;
+  const idle = !playback;
+  const wideIdle = idle && (isTablet || isDesktop);
+  // Mobile sticky band; desktop: keep 2:3 ratio — height first, else cap width at 50%.
+  const posterHeight = Math.min(300, Math.round(windowWidth * 0.88));
+  const POSTER_W_OVER_H = 2 / 3;
+  const desktopMaxWidth = Math.round(windowWidth * 0.5);
+  const desktopMaxHeight = Math.round(
+    windowHeight - (Platform.OS === 'web' ? 72 : 56) - spacing.lg * 2,
+  );
+  let desktopPosterHeight = desktopMaxHeight;
+  let desktopPosterWidth = Math.round(desktopPosterHeight * POSTER_W_OVER_H);
+  if (desktopPosterWidth > desktopMaxWidth) {
+    desktopPosterWidth = desktopMaxWidth;
+    desktopPosterHeight = Math.round(desktopPosterWidth / POSTER_W_OVER_H);
+  }
 
   const seasons = item?.seasons ?? [];
   const isSeries = item?.type === 'series' && seasons.length > 0;
@@ -111,6 +144,7 @@ export default function TitleScreen() {
   useEffect(() => {
     setPlayback(null);
     setPlayerFullscreen(false);
+    setPosterFailed(false);
     resumeStarted.current = false;
   }, [id]);
 
@@ -119,7 +153,6 @@ export default function TitleScreen() {
     setPlayback(next);
     scrollRef.current?.scrollTo({ y: 0, animated: true });
   };
-
   useEffect(() => {
     if (!item || resumeStarted.current) return;
     const resumeUri = paramString(params.resumeUri);
@@ -265,20 +298,24 @@ export default function TitleScreen() {
         }}
       />
 
-      <View style={[styles.split, isTablet && styles.splitWide]}>
       <View
         style={[
-          styles.playerDock,
-          { paddingHorizontal: playerFullscreen ? 0 : gutter },
-          isTablet && styles.playerDockWide,
-          playerFullscreen && styles.playerDockFullscreen,
+          styles.split,
+          (playback || wideIdle) && (isTablet || isDesktop) && styles.splitWide,
         ]}
       >
         {playback ? (
-          <>
+          <View
+            style={[
+              styles.playerDock,
+              { paddingHorizontal: playerFullscreen ? 0 : gutter },
+              (isTablet || isDesktop) && styles.playerDockWide,
+              playerFullscreen && styles.playerDockFullscreen,
+            ]}
+          >
             <Suspense
               fallback={
-                <View style={styles.playerPlaceholder}>
+                <View style={styles.playerLoading}>
                   <ActivityIndicator color={colors.accent} />
                   <Text style={styles.placeholderTitle}>
                     {strings.playbackLoading}
@@ -316,138 +353,215 @@ export default function TitleScreen() {
                 </Text>
               </Glass>
             )}
-          </>
-        ) : (
-          <Glass style={styles.playerPlaceholder}>
-            <View style={styles.placeholderIcon}>
-              <Ionicons name="play" size={28} color={colors.accent} />
-            </View>
-            <Text style={styles.placeholderTitle}>
-              {isSeries ? strings.tapToPlaySeries : strings.tapToPlay}
-            </Text>
-          </Glass>
-        )}
-      </View>
-
-      <ScrollView
-        ref={scrollRef}
-        style={styles.screen}
-        contentContainerStyle={[styles.content, { paddingHorizontal: gutter }]}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.hero}>
-          <View {...ltrProps} style={[styles.chips, ltrStyle]}>
-            <Pressable
-              onPress={() => toggleFavorite(item.imdbId)}
-              style={({ pressed }) => [pressed && styles.linkPressed]}
-              accessibilityRole="button"
-              accessibilityLabel={
-                favorited ? strings.unfavoriteA11y : strings.favoriteA11y
-              }
+          </View>
+        ) : wideIdle ? (
+          <View
+            style={[
+              styles.desktopPosterWrap,
+              {
+                paddingStart: gutter,
+                paddingEnd: spacing.md,
+                paddingVertical: spacing.lg,
+              },
+            ]}
+          >
+            <View
+              style={[
+                styles.desktopPosterPane,
+                { width: desktopPosterWidth, height: desktopPosterHeight },
+              ]}
             >
-              <Glass
-                style={[
-                  styles.chip,
-                  styles.favoriteChip,
-                  favorited && styles.favoriteChipOn,
-                ]}
-              >
-                <Ionicons
-                  name={favorited ? 'heart' : 'heart-outline'}
-                  size={13}
-                  color={favorited ? colors.accent : colors.textMuted}
+              {showPoster ? (
+                <Image
+                  source={{ uri: posterUrl as string }}
+                  style={styles.desktopPosterImage}
+                  resizeMode="cover"
+                  fadeDuration={0}
+                  onError={() => setPosterFailed(true)}
                 />
-                <Text
-                  style={[
-                    styles.favoriteChipText,
-                    favorited && styles.favoriteChipTextOn,
-                  ]}
-                >
-                  {strings.favorited}
-                </Text>
-              </Glass>
-            </Pressable>
-            <Glass style={styles.chip}>
-              <Text style={styles.chipText}>{kind}</Text>
-            </Glass>
-            {item.year != null ? (
-              <Glass style={styles.chip}>
-                <Text style={styles.chipText}>{yearLabel}</Text>
-              </Glass>
-            ) : null}
-            <Glass style={[styles.chip, styles.ratingChip]}>
-              <Ionicons name="star" size={13} color={colors.gold} />
-              <Text style={styles.ratingChipText}>{rating}</Text>
-            </Glass>
-            <Pressable
-              onPress={() => Linking.openURL(imdbUrl)}
-              style={({ pressed }) => [pressed && styles.linkPressed]}
-              accessibilityRole="link"
-              accessibilityLabel={strings.openImdb}
-            >
-              <Glass style={[styles.chip, styles.imdbChip]}>
-                <Ionicons name="open-outline" size={13} color={colors.accent} />
-                <Text style={styles.imdbChipText}>{strings.openImdb}</Text>
-              </Glass>
-            </Pressable>
-          </View>
-        </View>
-
-        <Glass {...ltrProps} style={[styles.stats, ltrStyle]}>
-          <View style={styles.stat}>
-            <Text style={styles.statLabel}>{strings.imdb}</Text>
-            <Text style={styles.statValue}>{item.imdbId}</Text>
-          </View>
-          <View style={styles.statDivider} />
-          <View style={styles.stat}>
-            <Text style={styles.statLabel}>{strings.rating}</Text>
-            <Text style={styles.statValue}>{rating}</Text>
-          </View>
-          <View style={styles.statDivider} />
-          <View style={styles.stat}>
-            <Text style={styles.statLabel}>{strings.votes}</Text>
-            <Text style={styles.statValue}>{votes}</Text>
-          </View>
-        </Glass>
-
-        {isSeries ? (
-          seasons.length === 0 ? (
-            <Glass style={styles.emptySources}>
-              <Text style={styles.muted}>{strings.noSources}</Text>
-            </Glass>
-          ) : (
-            <SeriesPicker
-              seasons={seasons}
-              activeEpisodeUrl={playback?.uri ?? null}
-              onPlayEpisode={onPlayEpisode}
-              onDownloadEpisode={onDownloadEpisode}
-            />
-          )
-        ) : groups.length === 0 ? (
-          <Glass style={styles.emptySources}>
-            <Text style={styles.muted}>{strings.noSources}</Text>
-          </Glass>
-        ) : (
-          groups.map((group) => (
-            <View key={group.edition} style={styles.group}>
-              <EditionDivider edition={group.edition as CatalogEdition} />
-              {group.items.map((source, index) => {
-                const key = sourceKey(source, index);
-                return (
-                  <SourceButton
-                    key={key}
-                    source={source}
-                    active={playback?.key === key}
-                    onPlay={() => onSourcePress(source, key)}
-                    onDownload={() => onSourceDownload(source)}
+              ) : (
+                <View style={styles.desktopPosterFallback}>
+                  <Ionicons
+                    name={isSeries ? 'tv-outline' : 'film-outline'}
+                    size={40}
+                    color={colors.textDim}
                   />
-                );
-              })}
+                </View>
+              )}
+              <LinearGradient
+                colors={['transparent', 'rgba(7,8,12,0.35)', colors.background]}
+                locations={[0.55, 0.82, 1]}
+                style={styles.parallaxPosterShade}
+                pointerEvents="none"
+              />
             </View>
-          ))
+          </View>
+        ) : (
+          <View
+            pointerEvents="none"
+            style={[styles.stickyPoster, { height: posterHeight }]}
+          >
+            {showPoster ? (
+              <Image
+                source={{ uri: posterUrl as string }}
+                style={styles.parallaxPosterImage}
+                resizeMode="cover"
+                fadeDuration={0}
+                onError={() => setPosterFailed(true)}
+              />
+            ) : (
+              <View style={styles.parallaxPosterFallback}>
+                <Ionicons
+                  name={isSeries ? 'tv-outline' : 'film-outline'}
+                  size={36}
+                  color={colors.textDim}
+                />
+              </View>
+            )}
+            <LinearGradient
+              colors={['rgba(7,8,12,0.05)', 'rgba(7,8,12,0.55)', colors.background]}
+              locations={[0.35, 0.78, 1]}
+              style={styles.parallaxPosterShade}
+            />
+          </View>
         )}
-      </ScrollView>
+
+        <ScrollView
+          ref={scrollRef}
+          style={styles.screen}
+          contentContainerStyle={[
+            styles.content,
+            wideIdle
+              ? { paddingHorizontal: gutter, paddingTop: spacing.lg }
+              : idle
+                ? { paddingTop: posterHeight - 20 }
+                : { paddingHorizontal: gutter },
+          ]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <View
+            style={[
+              styles.sheet,
+              idle && !wideIdle && styles.sheetOverPoster,
+              idle && !wideIdle && { minHeight: windowHeight - posterHeight + 48 },
+              idle && !wideIdle && styles.sheetPadded,
+              wideIdle && styles.sheetDesktop,
+            ]}
+          >
+            <View style={styles.hero}>
+              <View {...ltrProps} style={[styles.chips, ltrStyle]}>
+                <TvPressable
+                  onPress={() => toggleFavorite(item.imdbId)}
+                  style={({ pressed }) => [pressed && styles.linkPressed]}
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    favorited ? strings.unfavoriteA11y : strings.favoriteA11y
+                  }
+                >
+                  <Glass
+                    style={[
+                      styles.chip,
+                      styles.favoriteChip,
+                      favorited && styles.favoriteChipOn,
+                    ]}
+                  >
+                    <Ionicons
+                      name={favorited ? 'heart' : 'heart-outline'}
+                      size={13}
+                      color={favorited ? colors.accent : colors.textMuted}
+                    />
+                    <Text
+                      style={[
+                        styles.favoriteChipText,
+                        favorited && styles.favoriteChipTextOn,
+                      ]}
+                    >
+                      {strings.favorited}
+                    </Text>
+                  </Glass>
+                </TvPressable>
+                <Glass style={styles.chip}>
+                  <Text style={styles.chipText}>{kind}</Text>
+                </Glass>
+                {item.year != null ? (
+                  <Glass style={styles.chip}>
+                    <Text style={styles.chipText}>{yearLabel}</Text>
+                  </Glass>
+                ) : null}
+                <Glass style={[styles.chip, styles.ratingChip]}>
+                  <Ionicons name="star" size={13} color={colors.gold} />
+                  <Text style={styles.ratingChipText}>{rating}</Text>
+                </Glass>
+                <TvPressable
+                  onPress={() => Linking.openURL(imdbUrl)}
+                  style={({ pressed }) => [pressed && styles.linkPressed]}
+                  accessibilityRole="link"
+                  accessibilityLabel={strings.openImdb}
+                >
+                  <Glass style={[styles.chip, styles.imdbChip]}>
+                    <Ionicons name="open-outline" size={13} color={colors.accent} />
+                    <Text style={styles.imdbChipText}>{strings.openImdb}</Text>
+                  </Glass>
+                </TvPressable>
+              </View>
+            </View>
+
+            <Glass {...ltrProps} style={[styles.stats, ltrStyle]}>
+              <View style={styles.stat}>
+                <Text style={styles.statLabel}>{strings.imdb}</Text>
+                <Text style={styles.statValue}>{item.imdbId}</Text>
+              </View>
+              <View style={styles.statDivider} />
+              <View style={styles.stat}>
+                <Text style={styles.statLabel}>{strings.rating}</Text>
+                <Text style={styles.statValue}>{rating}</Text>
+              </View>
+              <View style={styles.statDivider} />
+              <View style={styles.stat}>
+                <Text style={styles.statLabel}>{strings.votes}</Text>
+                <Text style={styles.statValue}>{votes}</Text>
+              </View>
+            </Glass>
+
+            {isSeries ? (
+              seasons.length === 0 ? (
+                <Glass style={styles.emptySources}>
+                  <Text style={styles.muted}>{strings.noSources}</Text>
+                </Glass>
+              ) : (
+                <SeriesPicker
+                  seasons={seasons}
+                  activeEpisodeUrl={playback?.uri ?? null}
+                  onPlayEpisode={onPlayEpisode}
+                  onDownloadEpisode={onDownloadEpisode}
+                />
+              )
+            ) : groups.length === 0 ? (
+              <Glass style={styles.emptySources}>
+                <Text style={styles.muted}>{strings.noSources}</Text>
+              </Glass>
+            ) : (
+              groups.map((group) => (
+                <View key={group.edition} style={styles.group}>
+                  <EditionDivider edition={group.edition as CatalogEdition} />
+                  {group.items.map((source, index) => {
+                    const key = sourceKey(source, index);
+                    return (
+                      <SourceButton
+                        key={key}
+                        source={source}
+                        active={playback?.key === key}
+                        onPlay={() => onSourcePress(source, key)}
+                        onDownload={() => onSourceDownload(source)}
+                      />
+                    );
+                  })}
+                </View>
+              ))
+            )}
+          </View>
+        </ScrollView>
       </View>
     </GlassScreen>
   );
@@ -462,11 +576,35 @@ const styles = StyleSheet.create({
   },
   screen: {
     flex: 1,
+    zIndex: 1,
+    backgroundColor: 'transparent',
   },
   content: {
-    paddingTop: spacing.lg,
     paddingBottom: 96,
+    flexGrow: 1,
+  },
+  sheet: {
     gap: spacing.md,
+    paddingTop: spacing.lg,
+  },
+  sheetPadded: {
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.xl,
+  },
+  sheetDesktop: {
+    paddingTop: spacing.lg,
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.xl,
+    maxWidth: 760,
+    width: '100%',
+    alignSelf: 'stretch',
+    gap: spacing.md,
+  },
+  sheetOverPoster: {
+    backgroundColor: colors.background,
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    paddingTop: spacing.xl,
   },
   container: {
     flex: 1,
@@ -474,9 +612,6 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     gap: spacing.md,
     justifyContent: 'center',
-  },
-  playerSection: {
-    gap: spacing.sm,
   },
   playerDock: {
     paddingTop: spacing.md,
@@ -494,25 +629,65 @@ const styles = StyleSheet.create({
     padding: 0,
     backgroundColor: '#000',
   },
-  playerPlaceholder: {
+  playerLoading: {
     width: '100%',
     aspectRatio: 16 / 9,
     borderRadius: radii.card,
+    overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.sm,
-    paddingHorizontal: spacing.lg,
+    backgroundColor: colors.backgroundSoft,
   },
-  placeholderIcon: {
-    width: 64,
-    height: 64,
-    borderRadius: 22,
-    backgroundColor: colors.accentSoft,
-    alignItems: 'center',
+  stickyPoster: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    left: 0,
+    zIndex: 0,
+    overflow: 'hidden',
+    backgroundColor: colors.backgroundSoft,
+  },
+  desktopPosterWrap: {
+    flexShrink: 0,
+    alignSelf: 'stretch',
     justifyContent: 'center',
   },
+  desktopPosterPane: {
+    alignSelf: 'center',
+    flexShrink: 0,
+    overflow: 'hidden',
+    backgroundColor: colors.backgroundSoft,
+    borderRadius: radii.card,
+  },
+  desktopPosterImage: {
+    width: '100%',
+    height: '100%',
+  },
+  desktopPosterFallback: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.backgroundSoft,
+  },
+  parallaxPosterImage: {
+    ...StyleSheet.absoluteFill,
+    width: '100%',
+    height: '100%',
+  },
+  parallaxPosterFallback: {
+    ...StyleSheet.absoluteFill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.backgroundSoft,
+  },
+  parallaxPosterShade: {
+    ...StyleSheet.absoluteFill,
+  },
   placeholderTitle: {
-    color: colors.textMuted,
+    color: colors.text,
     fontSize: 14,
     fontFamily: fonts.regular,
     textAlign: 'center',
