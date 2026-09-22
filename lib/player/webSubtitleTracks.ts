@@ -139,13 +139,34 @@ function pathnameOf(url: string) {
   }
 }
 
+function fileNameOf(url: string) {
+  const path = pathnameOf(url);
+  return path.split('/').filter(Boolean).pop() || path;
+}
+
+function isCatalogHost(url: string) {
+  try {
+    return /^dls\d*\.aparatchi-dlcenter\.top$/i.test(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+}
+
 function findRedirectedResource(original: string) {
   if (typeof performance === 'undefined') return null;
   const originalPath = pathnameOf(original);
+  const originalName = fileNameOf(original);
   for (const entry of performance.getEntriesByType('resource')) {
-    if (entry.name === original) continue;
+    if (entry.name === original || isCatalogHost(entry.name)) continue;
     const path = pathnameOf(entry.name);
     if (path.endsWith(originalPath) || originalPath.endsWith(path)) {
+      return entry.name;
+    }
+    if (
+      originalName &&
+      fileNameOf(entry.name) === originalName &&
+      /\.(mkv|mp4|m4v|avi|webm)(?:$|\?)/i.test(entry.name)
+    ) {
       return entry.name;
     }
   }
@@ -186,8 +207,9 @@ function waitForFetchableUrl(original: string, signal?: AbortSignal) {
         finish(hit);
         return;
       }
-      if (Date.now() - started > 12_000) {
-        finish(original);
+      if (Date.now() - started > 20_000) {
+        cleanup();
+        reject(new Error('NO_FETCHABLE_URL'));
         return;
       }
       timer = setTimeout(poll, 150);
@@ -214,29 +236,45 @@ async function resolveViaProxy(original: string, signal?: AbortSignal) {
   });
   if (!response.ok) throw new Error(`HTTP_${response.status}`);
   const data = (await response.json()) as { url?: string };
-  if (typeof data?.url === 'string' && data.url.startsWith('https://')) {
+  if (
+    typeof data?.url === 'string' &&
+    data.url.startsWith('https://') &&
+    !isCatalogHost(data.url)
+  ) {
     return data.url;
   }
   throw new Error('BAD_RESOLVE');
 }
 
 async function resolveFetchableMediaUrl(original: string, signal?: AbortSignal) {
-  try {
-    return await resolveViaProxy(original, signal);
-  } catch {
-    // Local sidecar / Vercel function may be down; try the file hosts next.
-  }
+  const already = findRedirectedResource(original);
+  if (already) return already;
+
+  const fromTiming = waitForFetchableUrl(original, signal);
+  const fromProxy = resolveViaProxy(original, signal).catch(() => null);
+
+  const raced = await Promise.race([
+    fromTiming,
+    fromProxy.then((url) => {
+      if (url) return url;
+      return fromTiming;
+    }),
+  ]);
+  if (raced && !isCatalogHost(raced)) return raced;
+
   try {
     const probe = await fetch(original, {
       method: 'GET',
       headers: { Range: 'bytes=0-15' },
       signal,
     });
-    if (probe.ok || probe.status === 206) return original;
+    if ((probe.ok || probe.status === 206) && !isCatalogHost(original)) {
+      return original;
+    }
   } catch {
     // Catalog hosts redirect without CORS; the storage URL is CORS-enabled.
   }
-  return waitForFetchableUrl(original, signal);
+  return fromTiming;
 }
 
 function sidecarUrls(videoUrl: string) {
@@ -364,11 +402,11 @@ function isMkvUrl(url: string) {
   return /\.mkv(?:$|\?)/i.test(url);
 }
 
-function tracksFor(videoUrl: string): Promise<ExtractedSubtitleTrack[]> {
+function tracksFor(videoUrl: string, signal?: AbortSignal): Promise<ExtractedSubtitleTrack[]> {
   const cached = trackCache.get(videoUrl);
   if (cached) return cached;
   const pending = (async () => {
-    const fetchUrl = await resolveFetchableMediaUrl(videoUrl);
+    const fetchUrl = await resolveFetchableMediaUrl(videoUrl, signal);
     if (isMkvUrl(fetchUrl) || isMkvUrl(videoUrl)) {
       const extracted = await extractMkvTextSubtitles(fetchUrl);
       if (extracted.length) return extracted;
@@ -394,7 +432,7 @@ export async function loadWebVideoSubtitles(
 ) {
   if (typeof document === 'undefined') return;
   const video = await waitForVideo(player, signal);
-  const tracks = await tracksFor(videoUrl);
+  const tracks = await tracksFor(videoUrl, signal);
   if (!tracks.length || signal?.aborted) return;
   attachTracks(video, tracks);
 }
