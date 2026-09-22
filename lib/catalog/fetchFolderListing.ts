@@ -119,7 +119,7 @@ function parseAutoIndexHtml(html: string, folderUrl: string): ParsedIndex {
 
 function listingRequestUrl(url: string): string {
   if (Platform.OS !== 'web') return url;
-  return webCatalogApiUrl('/api/folder-listing', url);
+  return webCatalogApiUrl('/api/episodes', url);
 }
 
 async function fetchHtml(url: string): Promise<string> {
