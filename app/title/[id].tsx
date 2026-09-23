@@ -123,6 +123,8 @@ export default function TitleScreen() {
   // Mobile sticky band — 60% of viewport so posters crop less.
   const posterHeight = Math.round(windowHeight * 0.6);
   const POSTER_W_OVER_H = 2 / 3;
+  // Full 2:3 poster size; sticky box clips whatever hangs below.
+  const stickyPosterImageHeight = Math.round(windowWidth / POSTER_W_OVER_H);
   const desktopMaxWidth = Math.round(windowWidth * 0.5);
   const desktopMaxHeight = Math.round(
     windowHeight - (Platform.OS === 'web' ? 72 : 56) - spacing.lg * 2,
@@ -404,8 +406,14 @@ export default function TitleScreen() {
             {showPoster ? (
               <Image
                 source={{ uri: posterUrl as string }}
-                style={styles.parallaxPosterImage}
-                resizeMode="cover"
+                style={[
+                  styles.stickyPosterImage,
+                  {
+                    width: windowWidth,
+                    height: stickyPosterImageHeight,
+                  },
+                ]}
+                resizeMode="stretch"
                 fadeDuration={0}
                 onError={() => setPosterFailed(true)}
               />
@@ -418,11 +426,6 @@ export default function TitleScreen() {
                 />
               </View>
             )}
-            <LinearGradient
-              colors={['rgba(7,8,12,0.05)', 'rgba(7,8,12,0.55)', colors.background]}
-              locations={[0.35, 0.78, 1]}
-              style={styles.parallaxPosterShade}
-            />
           </View>
         )}
 
@@ -605,6 +608,16 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 22,
     borderTopRightRadius: 22,
     paddingTop: spacing.xl,
+    zIndex: 1,
+    // Soft lift shadow cast upward onto the poster (not a fill overlay).
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -22 },
+    shadowOpacity: 0.85,
+    shadowRadius: 43,
+    elevation: 29,
+    ...(Platform.OS === 'web'
+      ? ({ boxShadow: '0 -29px 72px rgba(0,0,0,0.85)' } as object)
+      : null),
   },
   container: {
     flex: 1,
@@ -672,10 +685,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: colors.backgroundSoft,
   },
-  parallaxPosterImage: {
-    ...StyleSheet.absoluteFill,
-    width: '100%',
-    height: '100%',
+  stickyPosterImage: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
   },
   parallaxPosterFallback: {
     ...StyleSheet.absoluteFill,
