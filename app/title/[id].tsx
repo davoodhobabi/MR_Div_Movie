@@ -120,8 +120,8 @@ export default function TitleScreen() {
   const showPoster = Boolean(posterUrl) && !posterFailed;
   const idle = !playback;
   const wideIdle = idle && (isTablet || isDesktop);
-  // Mobile sticky band; desktop: keep 2:3 ratio — height first, else cap width at 50%.
-  const posterHeight = Math.min(300, Math.round(windowWidth * 0.88));
+  // Mobile sticky band — 60% of viewport so posters crop less.
+  const posterHeight = Math.round(windowHeight * 0.6);
   const POSTER_W_OVER_H = 2 / 3;
   const desktopMaxWidth = Math.round(windowWidth * 0.5);
   const desktopMaxHeight = Math.round(
