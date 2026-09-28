@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
-# Build a versioned release APK to ~/Desktop/MrDiv_Movie-<version>.apk
+# Build a versioned release APK into releases/android and releases/tv
 #
 #   ./scripts/release-apk.sh              # build current version
 #   ./scripts/release-apk.sh bump         # bump patch, then build
 #   ./scripts/release-apk.sh bump minor   # bump minor, then build
 #   ./scripts/release-apk.sh bump 1.2.0   # set exact version, then build
 #   ./scripts/release-apk.sh bump --no-build patch
+#
+# Phone + Android TV share one dual leanback APK; copies land in:
+#   releases/android/MrDiv_Movie-<version>.apk
+#   releases/tv/MrDiv_Movie-<version>-android-tv.apk
 
 set -euo pipefail
 
@@ -173,10 +177,21 @@ perl -i -pe "s/versionName\\s+\\\"[^\\\"]+\\\"/versionName \\\"$VERSION\\\"/" an
 )
 
 APK_SRC="android/app/build/outputs/apk/release/app-release.apk"
-APK_DST="$HOME/Desktop/MrDiv_Movie-${VERSION}.apk"
-cp "$APK_SRC" "$APK_DST"
-ls -lh "$APK_SRC" "$APK_DST"
-adb devices -l
-adb install -r "$APK_SRC"
-adb shell monkey -p com.dmovie.app -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 || true
-echo "INSTALLED $APK_DST"
+RELEASES_DIR="$ROOT/releases"
+mkdir -p "$RELEASES_DIR/android" "$RELEASES_DIR/tv" "$RELEASES_DIR/web"
+APK_ANDROID="$RELEASES_DIR/android/MrDiv_Movie-${VERSION}.apk"
+APK_TV="$RELEASES_DIR/tv/MrDiv_Movie-${VERSION}-android-tv.apk"
+cp "$APK_SRC" "$APK_ANDROID"
+cp "$APK_SRC" "$APK_TV"
+ls -lh "$APK_SRC" "$APK_ANDROID" "$APK_TV"
+
+if command -v adb >/dev/null 2>&1 && adb devices 2>/dev/null | awk 'NR>1 && $2=="device"{found=1} END{exit !found}'; then
+  adb devices -l
+  adb install -r "$APK_SRC"
+  adb shell monkey -p com.dmovie.app -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 || true
+  echo "INSTALLED $APK_ANDROID"
+else
+  echo "No adb device — APKs ready in releases/android and releases/tv"
+fi
+echo "ANDROID $APK_ANDROID"
+echo "TV      $APK_TV"

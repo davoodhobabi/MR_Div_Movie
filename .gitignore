@@ -45,3 +45,6 @@ yarn-error.*
 .tmp-py/
 *.apk
 lib/catalog/data/.enrich-wikidata.json
+
+# local release artifacts (android / tv / web builds)
+releases/
