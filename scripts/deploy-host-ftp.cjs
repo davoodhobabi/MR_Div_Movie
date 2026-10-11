@@ -9,6 +9,21 @@ const { spawnSync } = require('child_process');
 const ROOT = path.join(__dirname, '..');
 const CONFIG_PATH = path.join(ROOT, '.deploy-ftp.json');
 
+function syncHostSources() {
+  const pairs = [
+    ['lib/catalog/mediaStream.cjs', 'host/mediaStream.cjs'],
+    ['lib/catalog/folderListingProxy.cjs', 'host/folderListingProxy.cjs'],
+    ['lib/catalog/imdbPoster.cjs', 'host/imdbPoster.cjs'],
+  ];
+  for (const [from, to] of pairs) {
+    const src = path.join(ROOT, from);
+    const dst = path.join(ROOT, to);
+    if (!fs.existsSync(src)) continue;
+    fs.copyFileSync(src, dst);
+    console.log('sync', from, '→', to);
+  }
+}
+
 function loadConfig() {
   if (!fs.existsSync(CONFIG_PATH)) {
     throw new Error('Missing .deploy-ftp.json (copy .deploy-ftp.example.json)');
@@ -77,6 +92,7 @@ ftp.quit()
 print(f"uploaded {uploaded} files")
 `;
 
+syncHostSources();
 const cfg = loadConfig();
 console.log(
   `Deploy ${cfg.localDir} → ftp://${cfg.user}@${cfg.host}:${cfg.port}${cfg.remoteDir}`,

@@ -1,0 +1,13 @@
+{
+  "name": "dmovie-host",
+  "version": "1.0.38",
+  "private": true,
+  "description": "DMovie web app + Iran /api on one Node process",
+  "main": "server.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.js"
+  }
+}

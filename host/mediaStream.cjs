@@ -1,0 +1,223 @@
+/**
+ * Remux remote MKV (etc.) to fragmented MP4 via ffmpeg so Safari/iPhone
+ * can play SoftSub sources in a plain <video> element (stream copy, no re-encode).
+ *
+ * GET /api/media-stream?url=<https media url>
+ */
+const fs = require('fs');
+const path = require('path');
+const { spawn, spawnSync } = require('child_process');
+
+const STREAM_PATH = '/api/media-stream';
+const ALLOWED_HOST = /^dls\d*\.aparatchi-dlcenter\.top$/i;
+const STORAGE_HOST = /\.hashuresport\.com$/i;
+const USER_AGENT =
+  'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36';
+
+function sendJson(res, status, body) {
+  res.statusCode = status;
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store');
+  res.end(JSON.stringify(body));
+}
+
+function requestUrl(req) {
+  const raw = req.url || '/';
+  if (/^https?:\/\//i.test(raw)) return new URL(raw);
+  const host = req.headers.host || 'localhost';
+  return new URL(raw, `http://${host}`);
+}
+
+function allowedTarget(raw) {
+  if (!raw || typeof raw !== 'string') return null;
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== 'https:') return null;
+    if (!ALLOWED_HOST.test(url.hostname) && !STORAGE_HOST.test(url.hostname)) {
+      return null;
+    }
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function vendorFfmpegPath() {
+  return path.join(__dirname, '..', '..', 'host', 'vendor', 'ffmpeg');
+}
+
+function hostVendorFfmpegPath() {
+  // When this file is copied next to server.js as host/mediaStream.cjs
+  return path.join(__dirname, 'vendor', 'ffmpeg');
+}
+
+function findFfmpeg() {
+  if (process.env.FFMPEG_PATH && fs.existsSync(process.env.FFMPEG_PATH)) {
+    return process.env.FFMPEG_PATH;
+  }
+  const candidates = [
+    hostVendorFfmpegPath(),
+    vendorFfmpegPath(),
+    'ffmpeg',
+    '/usr/bin/ffmpeg',
+    '/usr/local/bin/ffmpeg',
+    '/opt/homebrew/bin/ffmpeg',
+  ];
+  for (const candidate of candidates) {
+    try {
+      if (candidate.includes(path.sep) && !fs.existsSync(candidate)) continue;
+      const result = spawnSync(candidate, ['-version'], {
+        encoding: 'utf8',
+        timeout: 8000,
+      });
+      if (result.status === 0) return candidate;
+    } catch {
+      // try next
+    }
+  }
+  return null;
+}
+
+let cachedFfmpeg = undefined;
+
+function getFfmpegPath() {
+  if (cachedFfmpeg !== undefined) return cachedFfmpeg;
+  cachedFfmpeg = findFfmpeg();
+  // FTP uploads often drop the executable bit on vendor/ffmpeg.
+  if (cachedFfmpeg && cachedFfmpeg.includes(`${path.sep}vendor${path.sep}`)) {
+    try {
+      fs.chmodSync(cachedFfmpeg, 0o755);
+    } catch {
+      // ignore
+    }
+  }
+  return cachedFfmpeg;
+}
+
+function ffmpegAvailable() {
+  return Boolean(getFfmpegPath());
+}
+
+async function handleMediaStream(req, res, options = {}) {
+  const parsed = requestUrl(req);
+  if (!options.force && parsed.pathname !== STREAM_PATH) return false;
+
+  if (req.method === 'OPTIONS') {
+    res.statusCode = 204;
+    res.end();
+    return true;
+  }
+
+  if (req.method && req.method !== 'GET' && req.method !== 'HEAD') {
+    sendJson(res, 405, { error: 'METHOD' });
+    return true;
+  }
+
+  const target = allowedTarget(parsed.searchParams.get('url') || '');
+  if (!target) {
+    sendJson(res, 400, { error: 'EMPTY_URL' });
+    return true;
+  }
+
+  const ffmpeg = getFfmpegPath();
+  if (!ffmpeg) {
+    sendJson(res, 503, { error: 'FFMPEG_MISSING' });
+    return true;
+  }
+
+  if (req.method === 'HEAD') {
+    res.statusCode = 200;
+    res.setHeader('Content-Type', 'video/mp4');
+    res.setHeader('Cache-Control', 'no-store');
+    res.end();
+    return true;
+  }
+
+  // Progressive fMP4: Safari can play as the bytes arrive (no full remux first).
+  const args = [
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-nostdin',
+    '-user_agent',
+    USER_AGENT,
+    '-i',
+    target,
+    '-map',
+    '0:v:0',
+    '-map',
+    '0:a:0?',
+    '-c:v',
+    'copy',
+    '-c:a',
+    'copy',
+    '-sn',
+    '-dn',
+    '-movflags',
+    'frag_keyframe+empty_moov+default_base_moof',
+    '-f',
+    'mp4',
+    'pipe:1',
+  ];
+
+  res.statusCode = 200;
+  res.setHeader('Content-Type', 'video/mp4');
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Accept-Ranges', 'none');
+  if (typeof res.flushHeaders === 'function') res.flushHeaders();
+
+  const child = spawn(ffmpeg, args, {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  let stderr = '';
+  child.stderr.on('data', (chunk) => {
+    stderr += String(chunk);
+    if (stderr.length > 4000) stderr = stderr.slice(-4000);
+  });
+
+  child.stdout.pipe(res);
+
+  const kill = () => {
+    if (!child.killed) {
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        // already gone
+      }
+    }
+  };
+
+  req.on('close', kill);
+  res.on('close', kill);
+
+  child.on('error', (err) => {
+    if (!res.headersSent) {
+      sendJson(res, 502, { error: 'FFMPEG_SPAWN', detail: err.message });
+      return;
+    }
+    res.end();
+  });
+
+  child.on('close', (code) => {
+    if (code && code !== 0 && !res.writableEnded) {
+      if (!res.headersSent) {
+        sendJson(res, 502, {
+          error: 'FFMPEG_FAIL',
+          detail: stderr.trim() || `exit_${code}`,
+        });
+      } else {
+        res.end();
+      }
+    }
+  });
+
+  return true;
+}
+
+module.exports = {
+  STREAM_PATH,
+  handleMediaStream,
+  ffmpegAvailable,
+  getFfmpegPath,
+};

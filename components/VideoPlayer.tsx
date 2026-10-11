@@ -8,6 +8,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   BackHandler,
+  Linking,
   Platform,
   Pressable,
   StatusBar,
@@ -17,7 +18,11 @@ import {
 } from 'react-native';
 import { strings } from '../constants/strings';
 import { colors, fonts, radii, spacing } from '../constants/theme';
-import { encodeMediaUrl } from '../lib/catalog/videoSource';
+import {
+  encodeMediaUrl,
+  isHtml5UnsupportedMediaUrl,
+  resolvePlaybackUrl,
+} from '../lib/catalog/videoSource';
 import { pickPreferredSubtitle } from '../lib/player/subtitlePicker';
 import {
   disposeWebVideoSubtitles,
@@ -31,8 +36,10 @@ type VideoPlayerProps = {
   onProgress?: (progress: { currentTime: number; duration: number }) => void;
 };
 
+const WEB_LOAD_TIMEOUT_MS = 45_000;
+
 function isCodecError(message: string) {
-  return /mediacodec|videorenderer|x-matroska|decoder|hevc|h\.?265|format is not supported|-11828|cannot open/i.test(
+  return /mediacodec|videorenderer|x-matroska|matroska|decoder|hevc|h\.?265|format is not supported|no supported sources|demuxer|-11828|cannot open|empty src|ffmpeg/i.test(
     message,
   );
 }
@@ -43,7 +50,9 @@ export function VideoPlayer({
   onFullscreenChange,
   onProgress,
 }: VideoPlayerProps) {
-  const source = useMemo(() => encodeMediaUrl(uri), [uri]);
+  const originalUrl = useMemo(() => encodeMediaUrl(uri), [uri]);
+  const source = useMemo(() => resolvePlaybackUrl(uri), [uri]);
+  const webRemux = Platform.OS === 'web' && isHtml5UnsupportedMediaUrl(uri);
   const selectedRef = useRef(false);
   const didSeekRef = useRef(false);
   const viewRef = useRef<VideoView>(null);
@@ -64,22 +73,49 @@ export function VideoPlayer({
     onFullscreenChange?.(false);
     didSeekRef.current = false;
     lastProgressRef.current = { currentTime: 0, duration: 0 };
+    setLoading(true);
+    setError(null);
   }, [uri, onFullscreenChange]);
+
+  // setup() often runs before <video> mounts, so play() is a no-op; retry after mount.
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const timer = setTimeout(() => {
+      try {
+        player.play();
+      } catch {
+        // Autoplay may still be blocked until the user hits native controls.
+      }
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [player]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' || !loading || error) return;
+    const timer = setTimeout(() => {
+      setLoading(false);
+      setError(
+        webRemux ? strings.playbackWebRemuxFailed : strings.playbackWebTimedOut,
+      );
+    }, WEB_LOAD_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [loading, error, webRemux, source]);
 
   useEffect(() => {
     if (Platform.OS !== 'web') return;
     const controller = new AbortController();
     const mounted = player;
-    void loadWebVideoSubtitles(mounted, source, controller.signal).catch(
+    // Subtitles always extract from the original MKV URL, not the remux pipe.
+    void loadWebVideoSubtitles(mounted, originalUrl, controller.signal).catch(
       () => {
-        // HTML5 cannot read MKV SoftSub without this path; keep playback going.
+        // Keep playback going if SoftSub extract fails.
       },
     );
     return () => {
       controller.abort();
       disposeWebVideoSubtitles(mounted);
     };
-  }, [source, player]);
+  }, [originalUrl, player]);
 
   useEffect(() => {
     let alive = true;
@@ -172,11 +208,23 @@ export function VideoPlayer({
     if (status === 'error') {
       setLoading(false);
       const message = playerError?.message || strings.playbackFailed;
+      if (Platform.OS === 'web' && webRemux) {
+        setError(strings.playbackWebRemuxFailed);
+        return;
+      }
+      if (Platform.OS === 'web' && isCodecError(message)) {
+        setError(strings.playbackWebRemuxFailed);
+        return;
+      }
       setError(
         isCodecError(message) ? strings.playbackCodecUnsupported : message,
       );
     }
   });
+
+  const openExternal = () => {
+    void Linking.openURL(originalUrl);
+  };
 
   return (
     <View style={fullscreen ? styles.wrapperFullscreen : styles.wrapper}>
@@ -186,6 +234,7 @@ export function VideoPlayer({
         style={styles.video}
         player={player}
         nativeControls
+        playsInline
         fullscreenOptions={{ enable: true, orientation: 'landscape' }}
         allowsPictureInPicture={false}
         contentFit="contain"
@@ -203,7 +252,9 @@ export function VideoPlayer({
       {loading && !error ? (
         <View style={styles.overlay} pointerEvents="none">
           <ActivityIndicator color={colors.accent} />
-          <Text style={styles.overlayText}>{strings.playbackLoading}</Text>
+          <Text style={styles.overlayText}>
+            {webRemux ? strings.playbackWebRemuxing : strings.playbackLoading}
+          </Text>
         </View>
       ) : null}
       {error ? (
@@ -224,6 +275,20 @@ export function VideoPlayer({
           >
             <Text style={styles.retryBtnText}>{strings.retryFetch}</Text>
           </Pressable>
+          {Platform.OS === 'web' ? (
+            <Pressable
+              onPress={openExternal}
+              style={({ pressed }) => [
+                styles.retryBtn,
+                styles.retryBtnSecondary,
+                pressed && styles.pressed,
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel={strings.openExternalFile}
+            >
+              <Text style={styles.retryBtnText}>{strings.openExternalFile}</Text>
+            </Pressable>
+          ) : null}
         </View>
       ) : null}
     </View>
@@ -261,6 +326,7 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: 13,
     fontFamily: fonts.regular,
+    textAlign: 'center',
   },
   errorText: {
     color: colors.text,
@@ -274,6 +340,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: radii.button,
+  },
+  retryBtnSecondary: {
+    backgroundColor: colors.backgroundSoft,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   retryBtnText: {
     color: colors.text,
