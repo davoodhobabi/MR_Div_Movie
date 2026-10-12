@@ -21,8 +21,11 @@ import { colors, fonts, radii, spacing } from '../constants/theme';
 import {
   encodeMediaUrl,
   isHtml5UnsupportedMediaUrl,
-  resolvePlaybackUrl,
 } from '../lib/catalog/videoSource';
+import {
+  webMediaStreamProbeUrl,
+  webMediaStreamUrl,
+} from '../lib/catalog/webProxy';
 import { pickPreferredSubtitle } from '../lib/player/subtitlePicker';
 import {
   disposeWebVideoSubtitles,
@@ -36,7 +39,13 @@ type VideoPlayerProps = {
   onProgress?: (progress: { currentTime: number; duration: number }) => void;
 };
 
-const WEB_LOAD_TIMEOUT_MS = 45_000;
+function isIosWeb() {
+  if (Platform.OS !== 'web' || typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  const touchMac =
+    navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
+  return /iPad|iPhone|iPod/i.test(ua) || touchMac;
+}
 
 function isCodecError(message: string) {
   return /mediacodec|videorenderer|x-matroska|matroska|decoder|hevc|h\.?265|format is not supported|no supported sources|demuxer|-11828|cannot open|empty src|ffmpeg/i.test(
@@ -51,10 +60,10 @@ export function VideoPlayer({
   onProgress,
 }: VideoPlayerProps) {
   const originalUrl = useMemo(() => encodeMediaUrl(uri), [uri]);
-  const source = useMemo(() => resolvePlaybackUrl(uri), [uri]);
-  const webRemux = Platform.OS === 'web' && isHtml5UnsupportedMediaUrl(uri);
+  const iosMkv = isIosWeb() && isHtml5UnsupportedMediaUrl(uri);
   const selectedRef = useRef(false);
   const didSeekRef = useRef(false);
+  const remuxStateRef = useRef<'idle' | 'trying' | 'active' | 'failed'>('idle');
   const viewRef = useRef<VideoView>(null);
   const onProgressRef = useRef(onProgress);
   onProgressRef.current = onProgress;
@@ -62,7 +71,7 @@ export function VideoPlayer({
   const [error, setError] = useState<string | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
 
-  const player = useVideoPlayer(source, (instance) => {
+  const player = useVideoPlayer(originalUrl, (instance) => {
     instance.loop = false;
     instance.play();
   });
@@ -75,7 +84,37 @@ export function VideoPlayer({
     lastProgressRef.current = { currentTime: 0, duration: 0 };
     setLoading(true);
     setError(null);
+    remuxStateRef.current = 'idle';
   }, [uri, onFullscreenChange]);
+
+  // iPhone Safari cannot demux MKV. Only switch to the server remux when ffmpeg
+  // is actually available; otherwise keep the original URL so playback is unchanged.
+  useEffect(() => {
+    if (!iosMkv) return;
+    let cancel = false;
+    remuxStateRef.current = 'trying';
+    void (async () => {
+      try {
+        const response = await fetch(webMediaStreamProbeUrl());
+        const data = (await response.json()) as { ffmpeg?: boolean };
+        if (cancel || !data?.ffmpeg) {
+          if (!cancel && remuxStateRef.current === 'trying') {
+            remuxStateRef.current = 'failed';
+          }
+          return;
+        }
+        if (cancel) return;
+        remuxStateRef.current = 'active';
+        player.replace(webMediaStreamUrl(originalUrl));
+        player.play();
+      } catch {
+        if (!cancel) remuxStateRef.current = 'failed';
+      }
+    })();
+    return () => {
+      cancel = true;
+    };
+  }, [iosMkv, originalUrl, player]);
 
   // setup() often runs before <video> mounts, so play() is a no-op; retry after mount.
   useEffect(() => {
@@ -89,17 +128,6 @@ export function VideoPlayer({
     }, 0);
     return () => clearTimeout(timer);
   }, [player]);
-
-  useEffect(() => {
-    if (Platform.OS !== 'web' || !loading || error) return;
-    const timer = setTimeout(() => {
-      setLoading(false);
-      setError(
-        webRemux ? strings.playbackWebRemuxFailed : strings.playbackWebTimedOut,
-      );
-    }, WEB_LOAD_TIMEOUT_MS);
-    return () => clearTimeout(timer);
-  }, [loading, error, webRemux, source]);
 
   useEffect(() => {
     if (Platform.OS !== 'web') return;
@@ -206,16 +234,25 @@ export function VideoPlayer({
       return;
     }
     if (status === 'error') {
+      if (iosMkv && remuxStateRef.current === 'active') {
+        remuxStateRef.current = 'failed';
+        setLoading(true);
+        setError(null);
+        try {
+          player.replace(originalUrl);
+          player.play();
+        } catch {
+          setError(strings.playbackWebRemuxFailed);
+        }
+        return;
+      }
+      if (iosMkv && remuxStateRef.current !== 'failed') {
+        setLoading(true);
+        setError(null);
+        return;
+      }
       setLoading(false);
       const message = playerError?.message || strings.playbackFailed;
-      if (Platform.OS === 'web' && webRemux) {
-        setError(strings.playbackWebRemuxFailed);
-        return;
-      }
-      if (Platform.OS === 'web' && isCodecError(message)) {
-        setError(strings.playbackWebRemuxFailed);
-        return;
-      }
       setError(
         isCodecError(message) ? strings.playbackCodecUnsupported : message,
       );
@@ -253,7 +290,9 @@ export function VideoPlayer({
         <View style={styles.overlay} pointerEvents="none">
           <ActivityIndicator color={colors.accent} />
           <Text style={styles.overlayText}>
-            {webRemux ? strings.playbackWebRemuxing : strings.playbackLoading}
+            {iosMkv && remuxStateRef.current === 'active'
+              ? strings.playbackWebRemuxing
+              : strings.playbackLoading}
           </Text>
         </View>
       ) : null}

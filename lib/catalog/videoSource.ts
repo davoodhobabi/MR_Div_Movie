@@ -1,6 +1,3 @@
-import { Platform } from 'react-native';
-import { webMediaStreamUrl } from './webProxy';
-
 /** Encode each path segment so filenames with spaces/unicode still stream. */
 export function encodeMediaUrl(raw: string): string {
   try {
@@ -35,11 +32,7 @@ export function isHtml5UnsupportedMediaUrl(raw: string): boolean {
   }
 }
 
-/** URI passed to expo-video / HTML5 on each platform. */
+/** URI passed to expo-video. Web plays the original file; iPhone MKV remux is opt-in. */
 export function resolvePlaybackUrl(raw: string): string {
-  const encoded = encodeMediaUrl(raw);
-  if (Platform.OS === 'web' && isHtml5UnsupportedMediaUrl(encoded)) {
-    return webMediaStreamUrl(encoded);
-  }
-  return encoded;
+  return encodeMediaUrl(raw);
 }
