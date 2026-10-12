@@ -10,6 +10,7 @@ web-build/
 # Host deploy package: keep Node sources in git; ignore build output + ffmpeg binary
 host/dist/
 host/vendor/
+host/tmp/
 expo-env.d.ts
 
 # Native

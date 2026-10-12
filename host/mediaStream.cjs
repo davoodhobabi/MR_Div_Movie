@@ -5,6 +5,7 @@
  * GET /api/media-stream?url=<https media url>
  */
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 
@@ -51,29 +52,55 @@ function hostVendorFfmpegPath() {
   return path.join(__dirname, 'vendor', 'ffmpeg');
 }
 
-function findFfmpeg() {
-  if (process.env.FFMPEG_PATH && fs.existsSync(process.env.FFMPEG_PATH)) {
-    return process.env.FFMPEG_PATH;
+function tryRun(candidate) {
+  try {
+    if (candidate.includes(path.sep)) {
+      if (!fs.existsSync(candidate)) return false;
+      try {
+        fs.chmodSync(candidate, 0o755);
+      } catch {
+        // noexec homes still fail the spawn below
+      }
+    }
+    const result = spawnSync(candidate, ['-version'], {
+      encoding: 'utf8',
+      timeout: 8000,
+    });
+    return result.status === 0;
+  } catch {
+    return false;
   }
-  const candidates = [
-    hostVendorFfmpegPath(),
-    vendorFfmpegPath(),
+}
+
+/** cPanel home directories are often mounted noexec; /tmp usually is not. */
+function materializeRunnable(candidate) {
+  if (!candidate.includes(path.sep) || !fs.existsSync(candidate)) return null;
+  const dest = path.join(os.tmpdir(), 'dmovie-ffmpeg');
+  try {
+    fs.copyFileSync(candidate, dest);
+    fs.chmodSync(dest, 0o755);
+  } catch {
+    return null;
+  }
+  return tryRun(dest) ? dest : null;
+}
+
+function findFfmpeg() {
+  const files = [];
+  if (process.env.FFMPEG_PATH) files.push(process.env.FFMPEG_PATH);
+  files.push(hostVendorFfmpegPath(), vendorFfmpegPath());
+  for (const candidate of files) {
+    if (tryRun(candidate)) return candidate;
+    const copied = materializeRunnable(candidate);
+    if (copied) return copied;
+  }
+  for (const candidate of [
     'ffmpeg',
     '/usr/bin/ffmpeg',
     '/usr/local/bin/ffmpeg',
     '/opt/homebrew/bin/ffmpeg',
-  ];
-  for (const candidate of candidates) {
-    try {
-      if (candidate.includes(path.sep) && !fs.existsSync(candidate)) continue;
-      const result = spawnSync(candidate, ['-version'], {
-        encoding: 'utf8',
-        timeout: 8000,
-      });
-      if (result.status === 0) return candidate;
-    } catch {
-      // try next
-    }
+  ]) {
+    if (tryRun(candidate)) return candidate;
   }
   return null;
 }
@@ -98,6 +125,114 @@ function ffmpegAvailable() {
   return Boolean(getFfmpegPath());
 }
 
+function parseStreams(stderr) {
+  const video = [];
+  const audio = [];
+  for (const line of String(stderr || '').split('\n')) {
+    const match = /Stream #\d+:\d+(?:\[[^\]]+\])?(?:\([^)]+\))?: (Video|Audio): (\w+)/i.exec(
+      line,
+    );
+    if (!match) continue;
+    const kind = match[1].toLowerCase();
+    const codec = match[2].toLowerCase();
+    if (kind === 'video') video.push(codec);
+    if (kind === 'audio') audio.push(codec);
+  }
+  const durationMatch = /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/.exec(String(stderr || ''));
+  const duration = durationMatch
+    ? Number(durationMatch[1]) * 3600 +
+      Number(durationMatch[2]) * 60 +
+      Number(durationMatch[3])
+    : 0;
+  return { video: video[0] || null, audio: audio[0] || null, duration };
+}
+
+function probeStreams(ffmpeg, target) {
+  return new Promise((resolve) => {
+    const child = spawn(
+      ffmpeg,
+      ['-hide_banner', '-nostdin', '-probesize', '1000000', '-analyzeduration', '1000000', '-user_agent', USER_AGENT, '-i', target],
+      { stdio: ['ignore', 'ignore', 'pipe'] },
+    );
+    let stderr = '';
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      resolve(parseStreams(stderr));
+    };
+    const timer = setTimeout(() => {
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        // already exited
+      }
+      finish();
+    }, 15000);
+    child.stderr.on('data', (chunk) => {
+      stderr += String(chunk);
+      if (stderr.length > 30000) stderr = stderr.slice(-30000);
+      if (stderr.includes('At least one output file must be specified')) {
+        clearTimeout(timer);
+        try {
+          child.kill('SIGKILL');
+        } catch {
+          // already exited
+        }
+        finish();
+      }
+    });
+    child.on('close', () => {
+      clearTimeout(timer);
+      finish();
+    });
+    child.on('error', () => {
+      clearTimeout(timer);
+      finish();
+    });
+  });
+}
+
+function remuxArgs(target, streams) {
+  const video = streams.video;
+  const audio = streams.audio;
+  const args = [
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-nostdin',
+    '-user_agent',
+    USER_AGENT,
+    '-i',
+    target,
+    '-map',
+    '0:v:0',
+    '-sn',
+    '-dn',
+  ];
+  if (video === 'hevc' || video === 'h265') {
+    args.push('-c:v', 'copy', '-bsf:v', 'hevc_mp4toannexb', '-tag:v', 'hvc1');
+  } else if (video === 'h264' || video === 'avc') {
+    args.push('-c:v', 'copy', '-bsf:v', 'h264_mp4toannexb', '-tag:v', 'avc1');
+  } else {
+    return null;
+  }
+  const copyAudio = ['aac', 'mp3', 'ac3', 'eac3', 'alac'].includes(audio || '');
+  if (copyAudio) {
+    args.push('-map', '0:a:0', '-c:a', 'copy');
+  } else {
+    args.push('-an');
+  }
+  args.push(
+    '-movflags',
+    'frag_keyframe+empty_moov+default_base_moof',
+    '-f',
+    'mp4',
+    'pipe:1',
+  );
+  return args;
+}
+
 async function handleMediaStream(req, res, options = {}) {
   const parsed = requestUrl(req);
   if (!options.force && parsed.pathname !== STREAM_PATH) return false;
@@ -113,105 +248,22 @@ async function handleMediaStream(req, res, options = {}) {
     return true;
   }
 
+  if (parsed.searchParams.get('probe') === '1') {
+    sendJson(res, 200, { ffmpeg: ffmpegAvailable() });
+    return true;
+  }
+
   const target = allowedTarget(parsed.searchParams.get('url') || '');
   if (!target) {
     sendJson(res, 400, { error: 'EMPTY_URL' });
     return true;
   }
 
-  const ffmpeg = getFfmpegPath();
-  if (!ffmpeg) {
-    sendJson(res, 503, { error: 'FFMPEG_MISSING' });
-    return true;
-  }
-
-  if (req.method === 'HEAD') {
-    res.statusCode = 200;
-    res.setHeader('Content-Type', 'video/mp4');
-    res.setHeader('Cache-Control', 'no-store');
-    res.end();
-    return true;
-  }
-
-  // Progressive fMP4: Safari can play as the bytes arrive (no full remux first).
-  const args = [
-    '-hide_banner',
-    '-loglevel',
-    'error',
-    '-nostdin',
-    '-user_agent',
-    USER_AGENT,
-    '-i',
-    target,
-    '-map',
-    '0:v:0',
-    '-map',
-    '0:a:0?',
-    '-c:v',
-    'copy',
-    '-c:a',
-    'copy',
-    '-sn',
-    '-dn',
-    '-movflags',
-    'frag_keyframe+empty_moov+default_base_moof',
-    '-f',
-    'mp4',
-    'pipe:1',
-  ];
-
-  res.statusCode = 200;
-  res.setHeader('Content-Type', 'video/mp4');
-  res.setHeader('Cache-Control', 'no-store');
-  res.setHeader('Accept-Ranges', 'none');
-  if (typeof res.flushHeaders === 'function') res.flushHeaders();
-
-  const child = spawn(ffmpeg, args, {
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-
-  let stderr = '';
-  child.stderr.on('data', (chunk) => {
-    stderr += String(chunk);
-    if (stderr.length > 4000) stderr = stderr.slice(-4000);
-  });
-
-  child.stdout.pipe(res);
-
-  const kill = () => {
-    if (!child.killed) {
-      try {
-        child.kill('SIGKILL');
-      } catch {
-        // already gone
-      }
-    }
-  };
-
-  req.on('close', kill);
-  res.on('close', kill);
-
-  child.on('error', (err) => {
-    if (!res.headersSent) {
-      sendJson(res, 502, { error: 'FFMPEG_SPAWN', detail: err.message });
-      return;
-    }
-    res.end();
-  });
-
-  child.on('close', (code) => {
-    if (code && code !== 0 && !res.writableEnded) {
-      if (!res.headersSent) {
-        sendJson(res, 502, {
-          error: 'FFMPEG_FAIL',
-          detail: stderr.trim() || `exit_${code}`,
-        });
-      } else {
-        res.end();
-      }
-    }
-  });
-
+  // iPhone Safari requests this URL after the ffmpeg probe. A single chunked
+  // MP4 is buffered by the host until the whole movie exists, so return HLS
+  // segments that Safari can play natively.
+  const { servePlaylistForTarget } = require('./mediaHls.cjs');
+  await servePlaylistForTarget(req, res, target);
   return true;
 }
 
@@ -220,4 +272,7 @@ module.exports = {
   handleMediaStream,
   ffmpegAvailable,
   getFfmpegPath,
+  probeStreams,
+  allowedTarget,
+  USER_AGENT,
 };

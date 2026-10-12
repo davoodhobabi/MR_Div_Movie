@@ -5,6 +5,8 @@
  */
 const http = require('http');
 const { handlePosterImage } = require('./imdbPoster.cjs');
+const { handleMediaStream } = require('./mediaStream.cjs');
+const { handleMediaHls } = require('./mediaHls.cjs');
 
 const ALLOWED_HOST = /^dls\d*\.aparatchi-dlcenter\.top$/i;
 const STORAGE_HOST = /\.hashuresport\.com$/i;
@@ -280,6 +282,8 @@ function startLocalFolderProxy(port = DEV_PROXY_PORT) {
       .then((handled) => (handled ? true : handleFolderListing(req, res)))
       .then((handled) => (handled ? true : handleMediaResolve(req, res)))
       .then((handled) => (handled ? true : handleMediaRange(req, res)))
+      .then((handled) => (handled ? true : handleMediaStream(req, res)))
+      .then((handled) => (handled ? true : handleMediaHls(req, res)))
       .then((handled) => {
         if (handled) return;
         res.statusCode = 404;
@@ -315,6 +319,7 @@ module.exports = {
   handleFolderListing,
   handleMediaResolve,
   handleMediaRange,
+  handleMediaStream,
   handlePosterImage,
   startLocalFolderProxy,
 };

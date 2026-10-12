@@ -13,6 +13,7 @@ const {
   handleMediaRange,
 } = require('./folderListingProxy.cjs');
 const { handleMediaStream, ffmpegAvailable, getFfmpegPath } = require('./mediaStream.cjs');
+const { handleMediaHls } = require('./mediaHls.cjs');
 const { handlePosterImage } = require('./imdbPoster.cjs');
 
 const PORT = Number(process.env.PORT || 3000);
@@ -162,6 +163,7 @@ const server = http.createServer((req, res) => {
     .then((handled) => (handled ? true : handleMediaResolve(req, res)))
     .then((handled) => (handled ? true : handleMediaRange(req, res)))
     .then((handled) => (handled ? true : handleMediaStream(req, res)))
+    .then((handled) => (handled ? true : handleMediaHls(req, res)))
     .then((handled) => {
       if (handled) return;
       handleStatic(req, res, parsed);

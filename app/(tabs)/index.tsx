@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useIsFocused } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFloatingTabBarPadding } from '../../lib/tabBarInset';
@@ -18,20 +18,46 @@ import {
   markSupportReminderSeen,
   shouldShowSupportReminder,
 } from '../../lib/supportReminder';
+import { compareByImdbRating } from '../../lib/catalog/rating';
 import type { IndexedCatalogItem } from '../../lib/catalog/types';
 
 const FAVORITE_CAROUSEL_LIMIT = 5;
 
 export default function HomeScreen() {
-  const { count, favorites, continueWatching, dismissContinueWatching } =
-    useCatalog();
+  const {
+    count,
+    movies,
+    series,
+    favorites,
+    continueWatching,
+    dismissContinueWatching,
+    isFavorite,
+    toggleFavorite,
+  } = useCatalog();
   const [supportOpen, setSupportOpen] = useState(false);
   const homeFocused = useIsFocused();
   const tabBarPad = useFloatingTabBarPadding();
   const { isTablet, isDesktop, gutter, posterWidth } = useLayout();
   const favoriteLimit = isDesktop ? 12 : isTablet ? 8 : FAVORITE_CAROUSEL_LIMIT;
+  const shelfLimit = isDesktop ? 20 : isTablet ? 16 : 12;
   const favoriteCards = favorites.slice(0, favoriteLimit);
   const watchingCards = continueWatching.slice(0, isDesktop ? 12 : 8);
+  const movies2026 = useMemo(
+    () =>
+      movies
+        .filter((item) => item.year === 2026)
+        .sort(compareByImdbRating)
+        .slice(0, shelfLimit),
+    [movies, shelfLimit],
+  );
+  const topMovies = useMemo(
+    () => [...movies].sort(compareByImdbRating).slice(0, shelfLimit),
+    [movies, shelfLimit],
+  );
+  const topSeries = useMemo(
+    () => [...series].sort(compareByImdbRating).slice(0, shelfLimit),
+    [series, shelfLimit],
+  );
   const tagline = strings.catalogReady(count.toLocaleString('fa-IR'));
 
   useEffect(() => {
@@ -78,13 +104,11 @@ export default function HomeScreen() {
             </Glass>
           </View>
 
+          {favoriteCards.length > 0 ? (
           <HomeCarousel
             title={strings.favoritesTitle}
             icon="heart"
             onSeeAll={() => router.push('/favorites')}
-            empty={favoriteCards.length === 0}
-            emptyTitle={strings.favoritesCarouselEmpty}
-            emptyHint={strings.favoritesCarouselHint}
           >
             {favoriteCards.map((item) => (
               <HomeTitleCard
@@ -97,14 +121,13 @@ export default function HomeScreen() {
               />
             ))}
           </HomeCarousel>
+          ) : null}
 
+          {watchingCards.length > 0 ? (
           <HomeCarousel
             title={strings.nowPlayingSection}
             icon="play-circle"
             iconColor={colors.gold}
-            empty={watchingCards.length === 0}
-            emptyTitle={strings.nowPlayingEmpty}
-            emptyHint={strings.nowPlayingEmptyHint}
           >
             {watchingCards.map(({ item, entry }) => {
               const ratio =
@@ -140,6 +163,48 @@ export default function HomeScreen() {
                 />
               );
             })}
+          </HomeCarousel>
+          ) : null}
+
+          {movies2026.length > 0 ? (
+            <HomeCarousel title={strings.movies2026Section} icon="film" iconColor={colors.gold}>
+              {movies2026.map((item) => (
+                <HomeTitleCard
+                  key={item.imdbId}
+                  item={item}
+                  width={posterWidth}
+                  favorited={isFavorite(item.imdbId)}
+                  onToggleFavorite={() => toggleFavorite(item.imdbId)}
+                  onPress={() => openTitle(item)}
+                />
+              ))}
+            </HomeCarousel>
+          ) : null}
+
+          <HomeCarousel title={strings.topMoviesSection} icon="star" iconColor={colors.gold}>
+            {topMovies.map((item) => (
+              <HomeTitleCard
+                key={item.imdbId}
+                item={item}
+                width={posterWidth}
+                favorited={isFavorite(item.imdbId)}
+                onToggleFavorite={() => toggleFavorite(item.imdbId)}
+                onPress={() => openTitle(item)}
+              />
+            ))}
+          </HomeCarousel>
+
+          <HomeCarousel title={strings.topSeriesSection} icon="trophy" iconColor={colors.gold}>
+            {topSeries.map((item) => (
+              <HomeTitleCard
+                key={item.imdbId}
+                item={item}
+                width={posterWidth}
+                favorited={isFavorite(item.imdbId)}
+                onToggleFavorite={() => toggleFavorite(item.imdbId)}
+                onPress={() => openTitle(item)}
+              />
+            ))}
           </HomeCarousel>
         </ScrollView>
       </SafeAreaView>

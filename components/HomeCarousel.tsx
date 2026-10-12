@@ -4,7 +4,6 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { strings } from '../constants/strings';
 import { colors, fonts, radii, spacing } from '../constants/theme';
 import { useLayout } from '../lib/layout';
-import { ltrProps, ltrStyle } from '../lib/rtl';
 import { Glass } from './Glass';
 import { TvPressable } from './TvPressable';
 
@@ -29,7 +28,7 @@ export function HomeCarousel({
   emptyTitle,
   emptyHint,
 }: HomeCarouselProps) {
-  const { isDesktop, isTv, gutter, gridGap } = useLayout();
+  const { gutter, gridGap } = useLayout();
   return (
     <View style={styles.section}>
       <View style={[styles.header, { paddingHorizontal: gutter }]}>
@@ -59,21 +58,16 @@ export function HomeCarousel({
           {emptyTitle ? <Text style={styles.emptyTitle}>{emptyTitle}</Text> : null}
           {emptyHint ? <Text style={styles.emptyHint}>{emptyHint}</Text> : null}
         </Glass>
-      ) : isDesktop || isTv ? (
-          <View {...ltrProps} style={[styles.grid, ltrStyle, { paddingHorizontal: gutter, gap: gridGap }]}>
-            {children}
-          </View>
-        ) : (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={[styles.track, { paddingHorizontal: gutter, gap: gridGap }]}
-            style={[styles.scroller, ltrStyle]}
-            {...ltrProps}
-          >
-            {children}
-          </ScrollView>
-        )}
+      ) : (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={[styles.track, { paddingHorizontal: gutter, gap: gridGap }]}
+          style={styles.scroller}
+        >
+          {children}
+        </ScrollView>
+      )}
     </View>
   );
 }
@@ -112,11 +106,8 @@ const styles = StyleSheet.create({
   },
   scroller: {},
   track: {
-    flexDirection: 'row-reverse',
-  },
-  grid: {
-    flexDirection: 'row-reverse',
-    flexWrap: 'wrap',
+    flexDirection: 'row',
+    alignItems: 'flex-start',
   },
   empty: {
     borderRadius: radii.card,

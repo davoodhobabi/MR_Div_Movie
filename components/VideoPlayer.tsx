@@ -22,10 +22,7 @@ import {
   encodeMediaUrl,
   isHtml5UnsupportedMediaUrl,
 } from '../lib/catalog/videoSource';
-import {
-  webMediaStreamProbeUrl,
-  webMediaStreamUrl,
-} from '../lib/catalog/webProxy';
+import { webMediaHlsUrl } from '../lib/catalog/webProxy';
 import { pickPreferredSubtitle } from '../lib/player/subtitlePicker';
 import {
   disposeWebVideoSubtitles,
@@ -61,9 +58,10 @@ export function VideoPlayer({
 }: VideoPlayerProps) {
   const originalUrl = useMemo(() => encodeMediaUrl(uri), [uri]);
   const iosMkv = isIosWeb() && isHtml5UnsupportedMediaUrl(uri);
+  const sourceUrl = iosMkv ? webMediaHlsUrl(originalUrl) : originalUrl;
   const selectedRef = useRef(false);
   const didSeekRef = useRef(false);
-  const remuxStateRef = useRef<'idle' | 'trying' | 'active' | 'failed'>('idle');
+  const startedRef = useRef(false);
   const viewRef = useRef<VideoView>(null);
   const onProgressRef = useRef(onProgress);
   onProgressRef.current = onProgress;
@@ -71,7 +69,7 @@ export function VideoPlayer({
   const [error, setError] = useState<string | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
 
-  const player = useVideoPlayer(originalUrl, (instance) => {
+  const player = useVideoPlayer(sourceUrl, (instance) => {
     instance.loop = false;
     instance.play();
   });
@@ -82,39 +80,53 @@ export function VideoPlayer({
     onFullscreenChange?.(false);
     didSeekRef.current = false;
     lastProgressRef.current = { currentTime: 0, duration: 0 };
+    startedRef.current = false;
     setLoading(true);
     setError(null);
-    remuxStateRef.current = 'idle';
   }, [uri, onFullscreenChange]);
 
-  // iPhone Safari cannot demux MKV. Only switch to the server remux when ffmpeg
-  // is actually available; otherwise keep the original URL so playback is unchanged.
+  const hookedSourceRef = useRef(sourceUrl);
   useEffect(() => {
-    if (!iosMkv) return;
-    let cancel = false;
-    remuxStateRef.current = 'trying';
-    void (async () => {
-      try {
-        const response = await fetch(webMediaStreamProbeUrl());
-        const data = (await response.json()) as { ffmpeg?: boolean };
-        if (cancel || !data?.ffmpeg) {
-          if (!cancel && remuxStateRef.current === 'trying') {
-            remuxStateRef.current = 'failed';
-          }
-          return;
-        }
-        if (cancel) return;
-        remuxStateRef.current = 'active';
-        player.replace(webMediaStreamUrl(originalUrl));
-        player.play();
-      } catch {
-        if (!cancel) remuxStateRef.current = 'failed';
-      }
-    })();
-    return () => {
-      cancel = true;
+    if (hookedSourceRef.current === sourceUrl) return;
+    hookedSourceRef.current = sourceUrl;
+    try {
+      player.replace(sourceUrl);
+      player.play();
+    } catch {
+      // Playback can still start from the source passed to useVideoPlayer.
+    }
+  }, [player, sourceUrl]);
+
+  // Safari never reaches canplay on a raw MKV, so expo-video stays "loading".
+  // Clear our overlay from the real <video> element as soon as HLS actually plays.
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    const markStarted = () => {
+      startedRef.current = true;
+      setLoading(false);
     };
-  }, [iosMkv, originalUrl, player]);
+    const bound = new Set<HTMLVideoElement>();
+    const bind = (video: HTMLVideoElement) => {
+      if (bound.has(video)) return;
+      bound.add(video);
+      video.addEventListener('loadedmetadata', markStarted);
+      video.addEventListener('canplay', markStarted);
+      video.addEventListener('playing', markStarted);
+    };
+    document.querySelectorAll('video').forEach((node) => bind(node));
+    const observer = new MutationObserver(() => {
+      document.querySelectorAll('video').forEach((node) => bind(node));
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    return () => {
+      observer.disconnect();
+      bound.forEach((video) => {
+        video.removeEventListener('loadedmetadata', markStarted);
+        video.removeEventListener('canplay', markStarted);
+        video.removeEventListener('playing', markStarted);
+      });
+    };
+  }, [sourceUrl]);
 
   // setup() often runs before <video> mounts, so play() is a no-op; retry after mount.
   useEffect(() => {
@@ -214,6 +226,7 @@ export function VideoPlayer({
 
   useEventListener(player, 'statusChange', ({ status, error: playerError }) => {
     if (status === 'loading') {
+      if (startedRef.current) return;
       setLoading(true);
       setError(null);
       selectedRef.current = false;
@@ -234,27 +247,14 @@ export function VideoPlayer({
       return;
     }
     if (status === 'error') {
-      if (iosMkv && remuxStateRef.current === 'active') {
-        remuxStateRef.current = 'failed';
-        setLoading(true);
-        setError(null);
-        try {
-          player.replace(originalUrl);
-          player.play();
-        } catch {
-          setError(strings.playbackWebRemuxFailed);
-        }
-        return;
-      }
-      if (iosMkv && remuxStateRef.current !== 'failed') {
-        setLoading(true);
-        setError(null);
-        return;
-      }
       setLoading(false);
       const message = playerError?.message || strings.playbackFailed;
       setError(
-        isCodecError(message) ? strings.playbackCodecUnsupported : message,
+        iosMkv
+          ? strings.playbackWebRemuxFailed
+          : isCodecError(message)
+            ? strings.playbackCodecUnsupported
+            : message,
       );
     }
   });
@@ -290,9 +290,7 @@ export function VideoPlayer({
         <View style={styles.overlay} pointerEvents="none">
           <ActivityIndicator color={colors.accent} />
           <Text style={styles.overlayText}>
-            {iosMkv && remuxStateRef.current === 'active'
-              ? strings.playbackWebRemuxing
-              : strings.playbackLoading}
+            {iosMkv ? strings.playbackWebRemuxing : strings.playbackLoading}
           </Text>
         </View>
       ) : null}

@@ -51,6 +51,22 @@ export function webMediaStreamUrl(targetUrl: string): string {
   return `${IRAN_STREAM_ORIGIN}${rel}`;
 }
 
+/** HLS playlist for iPhone Safari. Same host rules as the remux stream. */
+export function webMediaHlsUrl(targetUrl: string): string {
+  const rel = `/api/media-hls?url=${encodeURIComponent(targetUrl)}`;
+  if (Platform.OS !== 'web') return rel;
+  if (typeof window === 'undefined') return rel;
+
+  const { protocol, hostname } = window.location;
+  if (typeof __DEV__ !== 'undefined' && __DEV__) {
+    return `${protocol}//${hostname}:${WEB_DEV_PROXY_PORT}${rel}`;
+  }
+  if (isIranAppHost(hostname)) {
+    return rel;
+  }
+  return `${IRAN_STREAM_ORIGIN}${rel}`;
+}
+
 /** `{ ffmpeg: true }` only when this host can actually run ffmpeg. */
 export function webMediaStreamProbeUrl(): string {
   const sample = webMediaStreamUrl('https://dls6.aparatchi-dlcenter.top/probe.mkv');

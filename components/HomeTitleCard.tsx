@@ -5,6 +5,7 @@ import { Image, PixelRatio, Pressable, StyleSheet, Text, View } from 'react-nati
 import { strings } from '../constants/strings';
 import { colors, fonts, radii } from '../constants/theme';
 import { usePosterUrl } from '../lib/catalog/poster';
+import { catalogScores } from '../lib/catalog/rating';
 import { isSeriesItem, type CatalogItem } from '../lib/catalog/types';
 import { ltrProps, ltrStyle } from '../lib/rtl';
 import { useIsTv, useTvFocus } from '../lib/tv';
@@ -53,9 +54,10 @@ export function HomeTitleCard({
     item.year != null
       ? item.year.toLocaleString('fa-IR', { useGrouping: false })
       : null;
+  const score = catalogScores(item).rating;
   const rating =
-    item.imdbRating != null
-      ? item.imdbRating.toLocaleString('fa-IR', {
+    score != null
+      ? score.toLocaleString('fa-IR', {
           minimumFractionDigits: 1,
           maximumFractionDigits: 1,
         })
@@ -73,17 +75,43 @@ export function HomeTitleCard({
     setPosterAttempt(0);
   }, [item.imdbId, posterUrl]);
 
+  const mark = watching ? (
+    <Pressable
+      onPress={onRemoveWatching}
+      hitSlop={10}
+      disabled={!onRemoveWatching}
+      focusable={!isTv}
+      style={[styles.mark, styles.markWatch, styles.markFloat]}
+      accessibilityRole="button"
+      accessibilityLabel={strings.removeFromNowPlayingA11y}
+    >
+      <Ionicons name="close" size={14} color={colors.gold} />
+    </Pressable>
+  ) : (
+    <Pressable
+      onPress={onToggleFavorite}
+      hitSlop={10}
+      disabled={!onToggleFavorite}
+      focusable={!isTv}
+      style={[styles.mark, styles.markFav, styles.markFloat]}
+      accessibilityRole={onToggleFavorite ? 'button' : undefined}
+    >
+      <Ionicons
+        name={favorited ? 'heart' : 'heart-outline'}
+        size={12}
+        color={colors.accent}
+      />
+    </Pressable>
+  );
+
   return (
+    <View style={{ width: frameWidth, height: frameHeight }}>
     <Pressable
       onPress={onPress}
       {...tvFocus.props}
-      style={({ pressed }) => [pressed && styles.pressed, tvFocus.style]}
+      style={({ pressed }) => [styles.frame, styles.fill, pressed && styles.pressed, tvFocus.style]}
       accessibilityRole="button"
     >
-      <View
-        collapsable={false}
-        style={[styles.frame, { width: frameWidth, height: frameHeight }]}
-      >
         <BlurTargetView ref={posterTargetRef} collapsable={false} style={styles.fill}>
           {showPoster ? (
             <>
@@ -121,34 +149,7 @@ export function HomeTitleCard({
 
         <View style={styles.overlay} pointerEvents="box-none">
           <View style={styles.badges} pointerEvents="box-none">
-            {watching ? (
-              <Pressable
-                onPress={onRemoveWatching}
-                hitSlop={10}
-                disabled={!onRemoveWatching}
-                focusable={!isTv}
-                style={[styles.mark, styles.markWatch]}
-                accessibilityRole="button"
-                accessibilityLabel={strings.removeFromNowPlayingA11y}
-              >
-                <Ionicons name="close" size={14} color={colors.gold} />
-              </Pressable>
-            ) : (
-              <Pressable
-                onPress={onToggleFavorite}
-                hitSlop={10}
-                disabled={!onToggleFavorite}
-                focusable={!isTv}
-                style={[styles.mark, styles.markFav]}
-                accessibilityRole={onToggleFavorite ? 'button' : undefined}
-              >
-                <Ionicons
-                  name={favorited ? 'heart' : 'heart-outline'}
-                  size={12}
-                  color={colors.accent}
-                />
-              </Pressable>
-            )}
+            <View style={styles.markSpacer} />
             <BlurView
               blurTarget={posterTargetRef}
               intensity={40}
@@ -210,8 +211,9 @@ export function HomeTitleCard({
             </BlurView>
           </View>
         </View>
-      </View>
     </Pressable>
+    {mark}
+    </View>
   );
 }
 
@@ -256,6 +258,16 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  markFloat: {
+    position: 'absolute',
+    top: 8,
+    left: 8,
+    zIndex: 2,
+  },
+  markSpacer: {
+    width: 24,
+    height: 24,
   },
   markFav: {
     backgroundColor: colors.accentSoft,

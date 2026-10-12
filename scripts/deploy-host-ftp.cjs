@@ -12,6 +12,7 @@ const CONFIG_PATH = path.join(ROOT, '.deploy-ftp.json');
 function syncHostSources() {
   const pairs = [
     ['lib/catalog/mediaStream.cjs', 'host/mediaStream.cjs'],
+    ['lib/catalog/mediaHls.cjs', 'host/mediaHls.cjs'],
     ['lib/catalog/folderListingProxy.cjs', 'host/folderListingProxy.cjs'],
     ['lib/catalog/imdbPoster.cjs', 'host/imdbPoster.cjs'],
   ];
@@ -75,24 +76,123 @@ else:
     ftp.cwd("/")
 
 uploaded = 0
+failed = []
 for dirpath, dirnames, filenames in os.walk(local):
     rel = os.path.relpath(dirpath, local)
+    parts = [] if rel == "." else rel.split(os.sep)
+    if "vendor" in parts:
+        continue
     remote = remote_root if rel == "." else f"{remote_root.rstrip('/')}/{rel.replace(os.sep, '/')}"
     ensure_dir(remote)
     for name in filenames:
         if name == ".DS_Store":
             continue
         local_file = Path(dirpath) / name
-        with open(local_file, "rb") as fh:
-            ftp.storbinary(f"STOR {name}", fh)
+        label = f"{rel}/{name}" if rel != "." else name
+        if local_file.stat().st_size > 1500 * 1024:
+            print("skip-large", label, local_file.stat().st_size)
+            continue
+        last_err = None
+        for attempt in range(1, 5):
+            try:
+                with open(local_file, "rb") as fh:
+                    ftp.storbinary(f"STOR {name}", fh, blocksize=256 * 1024)
+                last_err = None
+                break
+            except Exception as err:
+                last_err = err
+                print("retry", attempt, label, err)
+                try:
+                    ftp.close()
+                except Exception:
+                    pass
+                ftp = FTP()
+                ftp.connect(cfg["host"], int(cfg["port"]), timeout=120)
+                ftp.login(cfg["user"], cfg["password"])
+                ftp.set_pasv(True)
+                ensure_dir(remote)
+        if last_err is not None:
+            failed.append((dirpath, name, remote, label))
+            print("failed", label)
+            continue
         uploaded += 1
-        print("put", f"{rel}/{name}" if rel != "." else name)
+        print("put", label)
+
+for dirpath, name, remote, label in list(failed):
+    local_file = Path(dirpath) / name
+    ensure_dir(remote)
+    try:
+        with open(local_file, "rb") as fh:
+            ftp.storbinary(f"STOR {name}", fh, blocksize=64 * 1024)
+        uploaded += 1
+        print("put-retry", label)
+        failed = [item for item in failed if item[3] != label]
+    except Exception as err:
+        print("still-failed", label, err)
 
 ftp.quit()
 print(f"uploaded {uploaded} files")
+if failed:
+    raise SystemExit(1)
 `;
 
+function syncWebDist() {
+  const dist = path.join(ROOT, 'dist');
+  const dest = path.join(ROOT, 'host', 'dist');
+  if (!fs.existsSync(path.join(dist, 'index.html'))) {
+    console.warn('dist/index.html missing; web bundle was not refreshed');
+    return;
+  }
+  const jsDir = path.join(dest, '_expo', 'static', 'js', 'web');
+  fs.rmSync(jsDir, { recursive: true, force: true });
+  fs.cpSync(dist, dest, { recursive: true });
+  splitLargeBundles(dest);
+  console.log('sync dist → host/dist');
+}
+
+/** Pure-FTPd on this host resets once a single file passes ~2MB, and rejects some extensions. */
+function splitLargeBundles(hostDist) {
+  const jsDir = path.join(hostDist, '_expo', 'static', 'js', 'web');
+  const htmlPath = path.join(hostDist, 'index.html');
+  if (!fs.existsSync(jsDir) || !fs.existsSync(htmlPath)) return;
+  let html = fs.readFileSync(htmlPath, 'utf8');
+  const entries = fs
+    .readdirSync(jsDir)
+    .filter((name) => /^entry-[a-f0-9]+\.js$/.test(name));
+  for (const name of entries) {
+    const src = `/_expo/static/js/web/${name}`;
+    const filePath = path.join(jsDir, name);
+    if (!html.includes(src)) {
+      fs.unlinkSync(filePath);
+      continue;
+    }
+    const data = fs.readFileSync(filePath);
+    const chunkSize = 600 * 1024;
+    const partCount = Math.ceil(data.length / chunkSize);
+    const stem = name.replace(/\.js$/, '');
+    for (let i = 0; i < partCount; i += 1) {
+      const partName = `${stem}.p${String(i).padStart(2, '0')}.js`;
+      const slice = data.subarray(i * chunkSize, (i + 1) * chunkSize);
+      fs.writeFileSync(path.join(jsDir, partName), Buffer.from(slice).toString('base64'));
+    }
+    fs.unlinkSync(filePath);
+    const loader = `<script>(function(){var c=${partCount};var p="/_expo/static/js/web/${stem}.p";var o=[];function step(i){if(i>=c){var s=document.createElement("script");s.src=URL.createObjectURL(new Blob(o,{type:"text/javascript"}));document.body.appendChild(s);return;}fetch(p+String(i).padStart(2,"0")+".js").then(function(r){if(!r.ok)throw new Error("part");return r.text()}).then(function(t){var b=atob(t),u=new Uint8Array(b.length);for(var n=0;n<b.length;n++)u[n]=b.charCodeAt(n);o.push(u);step(i+1)}).catch(function(){setTimeout(function(){step(i)},1500)})}step(0)})();</script>`;
+    html = html.replace(`<script src="${src}" defer></script>`, loader);
+    fs.writeFileSync(htmlPath, html);
+    console.log('split', name, 'into', partCount, 'parts');
+  }
+}
+
+function touchPassengerRestart() {
+  const restart = path.join(ROOT, 'host', 'tmp', 'restart.txt');
+  fs.mkdirSync(path.dirname(restart), { recursive: true });
+  fs.writeFileSync(restart, `${Date.now()}\n`);
+  console.log('touch', 'host/tmp/restart.txt');
+}
+
 syncHostSources();
+syncWebDist();
+touchPassengerRestart();
 const cfg = loadConfig();
 console.log(
   `Deploy ${cfg.localDir} → ftp://${cfg.user}@${cfg.host}:${cfg.port}${cfg.remoteDir}`,
