@@ -363,20 +363,112 @@ function asPickerTracks(tracks: ExtractedSubtitleTrack[]): SubtitleTrack[] {
   }));
 }
 
+const SELECTED_ATTR = 'data-dmovie-sub-on';
+
+function chosenSubtitleId(
+  video: HTMLVideoElement,
+  preferredId: string | null,
+): string | null {
+  const chosen = video.getAttribute(SELECTED_ATTR);
+  if (chosen === 'off') return null;
+  if (chosen) return chosen;
+  return preferredId;
+}
+
 function applyTrackModes(
   video: HTMLVideoElement,
   preferredId: string | null,
 ) {
-  const preferred = [...video.querySelectorAll(`track[${TRACK_ATTR}]`)].find(
-    (node) => node.getAttribute(TRACK_ATTR) === preferredId,
-  ) as HTMLTrackElement | undefined;
-  for (let i = 0; i < video.textTracks.length; i++) {
-    const track = video.textTracks[i];
-    if (!track) continue;
-    const show =
-      preferred?.track === track ||
-      (!preferred && i === 0);
-    track.mode = show ? 'showing' : 'disabled';
+  const activeId = chosenSubtitleId(video, preferredId);
+  const nodes = [
+    ...video.querySelectorAll(`track[${TRACK_ATTR}]`),
+  ] as HTMLTrackElement[];
+  nodes.forEach((el) => {
+    if (!el.track) return;
+    const show = activeId != null && el.getAttribute(TRACK_ATTR) === activeId;
+    el.track.mode = show ? 'showing' : 'disabled';
+  });
+}
+
+export type WebSubtitleOption = { id: string; label: string };
+
+export function readWebSubtitles(video: HTMLVideoElement): {
+  options: WebSubtitleOption[];
+  activeId: string | null;
+} {
+  const nodes = [
+    ...video.querySelectorAll(`track[${TRACK_ATTR}]`),
+  ] as HTMLTrackElement[];
+  const options = nodes.map((el, index) => ({
+    id: el.getAttribute(TRACK_ATTR) || `sub-${index}`,
+    label: el.label || `زیرنویس ${(index + 1).toLocaleString('fa-IR')}`,
+  }));
+  const active = nodes.find((el) => el.track?.mode === 'showing');
+  return {
+    options,
+    activeId: active?.getAttribute(TRACK_ATTR) ?? null,
+  };
+}
+
+export function selectWebSubtitle(
+  video: HTMLVideoElement,
+  id: string | null,
+) {
+  video.setAttribute(SELECTED_ATTR, id ?? 'off');
+  applyTrackModes(video, null);
+}
+
+type SavedCuePlace = {
+  line: number;
+  snapToLines: boolean;
+  lineAlign: VTTCue['lineAlign'];
+};
+
+const savedCuePlace = new WeakMap<VTTCue, SavedCuePlace>();
+const movedCues = new Set<VTTCue>();
+
+/** Keep the active subtitle above the control bar. `liftPx` is the bar's height inside the video. */
+export function placeWebSubtitles(video: HTMLVideoElement, liftPx: number | null) {
+  if (liftPx == null) {
+    for (const cue of movedCues) {
+      const saved = savedCuePlace.get(cue);
+      if (!saved) continue;
+      try {
+        cue.snapToLines = saved.snapToLines;
+        cue.lineAlign = saved.lineAlign;
+        cue.line = saved.line;
+      } catch {
+        // A browser may reject cue edits.
+      }
+    }
+    movedCues.clear();
+    return;
+  }
+
+  const height = video.getBoundingClientRect().height || video.clientHeight || 1;
+  const line = Math.max(12, Math.min(86, ((height - liftPx) / height) * 100));
+  for (let index = 0; index < video.textTracks.length; index += 1) {
+    const cues = video.textTracks[index]?.activeCues;
+    if (!cues) continue;
+    for (let cueIndex = 0; cueIndex < cues.length; cueIndex += 1) {
+      const cue = cues[cueIndex] as VTTCue;
+      if (!cue || !('line' in cue)) continue;
+      if (!savedCuePlace.has(cue)) {
+        savedCuePlace.set(cue, {
+          line: cue.line,
+          snapToLines: cue.snapToLines,
+          lineAlign: cue.lineAlign,
+        });
+      }
+      try {
+        cue.snapToLines = false;
+        cue.lineAlign = 'end';
+        cue.line = line;
+        movedCues.add(cue);
+      } catch {
+        // Ignore cues the browser will not reposition.
+      }
+    }
   }
 }
 
@@ -385,6 +477,9 @@ function attachTracks(video: HTMLVideoElement, tracks: ExtractedSubtitleTrack[])
   clearTracks(video);
   const preferred = pickPreferredSubtitle(asPickerTracks(tracks));
   const preferredId = preferred?.id ?? tracks[0]?.id ?? null;
+  if (!video.getAttribute(SELECTED_ATTR) && preferredId) {
+    video.setAttribute(SELECTED_ATTR, preferredId);
+  }
   for (const track of tracks) {
     const el = document.createElement('track');
     el.setAttribute(TRACK_ATTR, track.id);

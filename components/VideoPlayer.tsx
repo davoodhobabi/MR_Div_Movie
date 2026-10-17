@@ -19,15 +19,23 @@ import {
 import { strings } from '../constants/strings';
 import { colors, fonts, radii, spacing } from '../constants/theme';
 import {
+  audioTrackLabels,
+  type RemoteAudioTrack,
+} from '../lib/catalog/audioLabel';
+import {
   encodeMediaUrl,
   isHtml5UnsupportedMediaUrl,
 } from '../lib/catalog/videoSource';
-import { webMediaHlsUrl } from '../lib/catalog/webProxy';
+import { webMediaHlsMetaUrl, webMediaHlsUrl } from '../lib/catalog/webProxy';
+import { attachWebHls } from '../lib/player/attachWebHls';
 import { pickPreferredSubtitle } from '../lib/player/subtitlePicker';
 import {
   disposeWebVideoSubtitles,
   loadWebVideoSubtitles,
+  readWebSubtitles,
+  selectWebSubtitle,
 } from '../lib/player/webSubtitleTracks';
+import { WebPlayerControls } from './WebPlayerControls';
 
 type VideoPlayerProps = {
   uri: string;
@@ -36,12 +44,8 @@ type VideoPlayerProps = {
   onProgress?: (progress: { currentTime: number; duration: number }) => void;
 };
 
-function isIosWeb() {
-  if (Platform.OS !== 'web' || typeof navigator === 'undefined') return false;
-  const ua = navigator.userAgent || '';
-  const touchMac =
-    navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
-  return /iPad|iPhone|iPod/i.test(ua) || touchMac;
+function webNeedsHls(uri: string) {
+  return Platform.OS === 'web' && isHtml5UnsupportedMediaUrl(uri);
 }
 
 function isCodecError(message: string) {
@@ -57,11 +61,25 @@ export function VideoPlayer({
   onProgress,
 }: VideoPlayerProps) {
   const originalUrl = useMemo(() => encodeMediaUrl(uri), [uri]);
-  const iosMkv = isIosWeb() && isHtml5UnsupportedMediaUrl(uri);
-  const sourceUrl = iosMkv ? webMediaHlsUrl(originalUrl) : originalUrl;
+  const webHls = webNeedsHls(uri);
+  const [audioIndex, setAudioIndex] = useState(0);
+  const [audioTracks, setAudioTracks] = useState<RemoteAudioTrack[]>([]);
+  const [playing, setPlaying] = useState(true);
+  const [volume, setVolume] = useState(1);
+  const [muted, setMuted] = useState(false);
+  const [rate, setRate] = useState(1);
+  const [clock, setClock] = useState({ currentTime: 0, duration: 0 });
+  const [subtitles, setSubtitles] = useState<{ id: string; label: string }[]>([]);
+  const [subtitleId, setSubtitleId] = useState<string | null>(null);
+  const sourceUrl = webHls
+    ? webMediaHlsUrl(originalUrl, audioIndex)
+    : originalUrl;
+  const audioLabels = useMemo(() => audioTrackLabels(audioTracks), [audioTracks]);
   const selectedRef = useRef(false);
   const didSeekRef = useRef(false);
   const startedRef = useRef(false);
+  const pendingSeekRef = useRef(0);
+  const boxRef = useRef<View>(null);
   const viewRef = useRef<VideoView>(null);
   const onProgressRef = useRef(onProgress);
   onProgressRef.current = onProgress;
@@ -81,6 +99,11 @@ export function VideoPlayer({
     didSeekRef.current = false;
     lastProgressRef.current = { currentTime: 0, duration: 0 };
     startedRef.current = false;
+    pendingSeekRef.current = 0;
+    setAudioIndex(0);
+    setAudioTracks([]);
+    setPlaying(true);
+    setRate(1);
     setLoading(true);
     setError(null);
   }, [uri, onFullscreenChange]);
@@ -96,6 +119,41 @@ export function VideoPlayer({
       // Playback can still start from the source passed to useVideoPlayer.
     }
   }, [player, sourceUrl]);
+
+  useEffect(() => {
+    if (!webHls) return;
+    let cancelled = false;
+    void fetch(webMediaHlsMetaUrl(originalUrl))
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body: { audioTracks?: RemoteAudioTrack[] } | null) => {
+        if (cancelled || !Array.isArray(body?.audioTracks)) return;
+        setAudioTracks(body.audioTracks.filter((track) => Number.isFinite(track.index)));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [originalUrl, webHls]);
+
+  useEffect(() => {
+    if (!webHls || Platform.OS !== 'web') return;
+    let dispose = () => {};
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      const node = boxRef.current as unknown as { querySelector?: (selector: string) => HTMLVideoElement | null };
+      const video = node?.querySelector?.('video');
+      if (!video || cancelled) return;
+      void attachWebHls(video, sourceUrl, pendingSeekRef.current).then((stop) => {
+        if (cancelled) stop();
+        else dispose = stop;
+      });
+    }, 40);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      dispose();
+    };
+  }, [sourceUrl, webHls]);
 
   // Safari never reaches canplay on a raw MKV, so expo-video stays "loading".
   // Clear our overlay from the real <video> element as soon as HLS actually plays.
@@ -185,6 +243,57 @@ export function VideoPlayer({
   }, [player]);
 
   useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    try {
+      player.playbackRate = rate;
+      player.volume = muted ? 0 : volume;
+      player.muted = muted || volume === 0;
+    } catch {
+      // The element may not be mounted yet.
+    }
+  }, [player, rate, volume, muted, sourceUrl]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const timer = setInterval(() => {
+      try {
+        setClock({
+          currentTime: player.currentTime || 0,
+          duration: Number.isFinite(player.duration) ? player.duration : 0,
+        });
+        const node = boxRef.current as unknown as {
+          querySelector?: (selector: string) => HTMLVideoElement | null;
+        };
+        const video = node?.querySelector?.('video');
+        if (!video) return;
+        const snapshot = readWebSubtitles(video);
+        setSubtitles(snapshot.options);
+        setSubtitleId(snapshot.activeId);
+      } catch {
+        // Player may already be released.
+      }
+    }, 400);
+    return () => clearInterval(timer);
+  }, [player, sourceUrl]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    const sync = () => {
+      const mine = boxRef.current as unknown as HTMLElement | null;
+      const active = document.fullscreenElement;
+      const on = Boolean(mine && active && (active === mine || mine.contains(active)));
+      setFullscreen(on);
+      onFullscreenChange?.(on);
+    };
+    document.addEventListener('fullscreenchange', sync);
+    document.addEventListener('webkitfullscreenchange', sync as EventListener);
+    return () => {
+      document.removeEventListener('fullscreenchange', sync);
+      document.removeEventListener('webkitfullscreenchange', sync as EventListener);
+    };
+  }, [onFullscreenChange]);
+
+  useEffect(() => {
     if (!fullscreen) return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
       void viewRef.current?.exitFullscreen();
@@ -235,6 +344,14 @@ export function VideoPlayer({
     if (status === 'readyToPlay') {
       setLoading(false);
       setError(null);
+      if (pendingSeekRef.current > 1) {
+        try {
+          player.currentTime = pendingSeekRef.current;
+        } catch {
+          // The browser HLS helper seeks on its own metadata event.
+        }
+        pendingSeekRef.current = 0;
+      }
       selectPreferredSubtitle();
       if (!didSeekRef.current && initialTime > 1) {
         try {
@@ -250,7 +367,7 @@ export function VideoPlayer({
       setLoading(false);
       const message = playerError?.message || strings.playbackFailed;
       setError(
-        iosMkv
+        webHls
           ? strings.playbackWebRemuxFailed
           : isCodecError(message)
             ? strings.playbackCodecUnsupported
@@ -263,14 +380,105 @@ export function VideoPlayer({
     void Linking.openURL(originalUrl);
   };
 
+  useEventListener(player, 'playingChange', ({ isPlaying }: { isPlaying: boolean }) => {
+    setPlaying(isPlaying);
+  });
+
+  const togglePlay = () => {
+    try {
+      if (player.playing) player.pause();
+      else player.play();
+    } catch {
+      // Ignore play calls before the media element exists.
+    }
+  };
+
+  const changeVolume = (value: number) => {
+    const next = Math.min(1, Math.max(0, value));
+    setVolume(next);
+    setMuted(next === 0);
+    try {
+      player.volume = next;
+      player.muted = next === 0;
+    } catch {
+      // Ignore until the element is mounted.
+    }
+  };
+
+  const changeRate = (next: number) => {
+    setRate(next);
+    try {
+      player.playbackRate = next;
+    } catch {
+      // Ignore until the element is mounted.
+    }
+  };
+
+  const changeSubtitle = (id: string | null) => {
+    const node = boxRef.current as unknown as {
+      querySelector?: (selector: string) => HTMLVideoElement | null;
+    };
+    const video = node?.querySelector?.('video');
+    if (video) selectWebSubtitle(video, id);
+    setSubtitleId(id);
+  };
+
+  const toggleFullscreen = () => {
+    if (Platform.OS !== 'web') {
+      if (fullscreen) void viewRef.current?.exitFullscreen();
+      else void viewRef.current?.enterFullscreen();
+      return;
+    }
+    const mine = boxRef.current as unknown as HTMLElement & {
+      webkitRequestFullscreen?: () => Promise<void> | void;
+    };
+    const active =
+      document.fullscreenElement ||
+      (document as Document & { webkitFullscreenElement?: Element | null })
+        .webkitFullscreenElement;
+    if (active) {
+      void document.exitFullscreen?.();
+      return;
+    }
+    if (fullscreen) {
+      setFullscreen(false);
+      onFullscreenChange?.(false);
+      return;
+    }
+    const request = mine?.requestFullscreen?.bind(mine) || mine?.webkitRequestFullscreen?.bind(mine);
+    if (!request) {
+      setFullscreen(true);
+      onFullscreenChange?.(true);
+      return;
+    }
+    void Promise.resolve(request()).catch(() => {
+      setFullscreen(true);
+      onFullscreenChange?.(true);
+    });
+  };
+
+  const selectAudio = (index: number) => {
+    if (index === audioIndex) return;
+    try {
+      pendingSeekRef.current = player.currentTime || 0;
+    } catch {
+      pendingSeekRef.current = 0;
+    }
+    setLoading(true);
+    setAudioIndex(index);
+  };
+
   return (
-    <View style={fullscreen ? styles.wrapperFullscreen : styles.wrapper}>
+    <View
+      ref={boxRef}
+      style={fullscreen ? styles.wrapperFullscreen : styles.wrapper}
+    >
       {fullscreen ? <StatusBar hidden /> : null}
       <VideoView
         ref={viewRef}
         style={styles.video}
         player={player}
-        nativeControls
+        nativeControls={Platform.OS !== 'web'}
         playsInline
         fullscreenOptions={{ enable: true, orientation: 'landscape' }}
         allowsPictureInPicture={false}
@@ -290,9 +498,41 @@ export function VideoPlayer({
         <View style={styles.overlay} pointerEvents="none">
           <ActivityIndicator color={colors.accent} />
           <Text style={styles.overlayText}>
-            {iosMkv ? strings.playbackWebRemuxing : strings.playbackLoading}
+            {webHls ? strings.playbackWebRemuxing : strings.playbackLoading}
           </Text>
         </View>
+      ) : null}
+      {Platform.OS === 'web' && !error ? (
+        <WebPlayerControls
+          playing={playing}
+          onTogglePlay={togglePlay}
+          volume={volume}
+          muted={muted}
+          onVolume={changeVolume}
+          audioLabels={audioLabels}
+          audioIndex={audioIndex}
+          onSelectAudio={(position) => {
+            const track = audioTracks[position];
+            if (track) selectAudio(track.index);
+          }}
+          subtitles={subtitles}
+          subtitleId={subtitleId}
+          onSelectSubtitle={changeSubtitle}
+          rate={rate}
+          onRate={changeRate}
+          fullscreen={fullscreen}
+          onToggleFullscreen={toggleFullscreen}
+          currentTime={clock.currentTime}
+          duration={clock.duration}
+          onSeek={(time) => {
+            try {
+              player.currentTime = time;
+              setClock((prev) => ({ ...prev, currentTime: time }));
+            } catch {
+              // Seek can fail before metadata arrives.
+            }
+          }}
+        />
       ) : null}
       {error ? (
         <View style={styles.overlay}>

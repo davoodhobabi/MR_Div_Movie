@@ -51,6 +51,8 @@ function saveMeta(session) {
         target: session.target,
         video: session.video,
         audio: session.audio,
+        audioIndex: session.audioIndex || 0,
+        audioTracks: session.audioTracks || [],
         duration: session.duration,
         stepMs: session.stepMs,
       }),
@@ -71,7 +73,7 @@ function loadMeta(id) {
 }
 
 function diskSegment(id, index) {
-  return path.join(SEG_DIR, id, `v6-${index}.ts`);
+  return path.join(SEG_DIR, id, `v7-${index}.ts`);
 }
 
 function readDiskSegment(id, index) {
@@ -178,7 +180,16 @@ function transcodeSegment(ffmpeg, session, start) {
   ];
   // audioArgs already includes -c:a copy or aac. Re-encode audio so the cut is exact.
   const audio = session.audio
-    ? ['-map', '0:a:0', '-c:a', 'aac', '-b:a', '96k', '-ac', '2']
+    ? [
+        '-map',
+        `0:a:${session.audioIndex || 0}`,
+        '-c:a',
+        'aac',
+        '-b:a',
+        '96k',
+        '-ac',
+        '2',
+      ]
     : ['-an'];
   const finalArgs = [
     '-hide_banner',
@@ -256,8 +267,23 @@ function transcodeSegment(ffmpeg, session, start) {
   });
 }
 
-async function ensureSession(target) {
-  const id = crypto.createHash('sha1').update(`enc6:${target}`).digest('hex').slice(0, 16);
+const probeCache = new Map();
+
+function probeCached(ffmpeg, target) {
+  const existing = probeCache.get(target);
+  if (existing) return existing;
+  const job = probeStreams(ffmpeg, target);
+  probeCache.set(target, job);
+  return job;
+}
+
+async function ensureSession(target, audioIndex) {
+  const requested = Number.isFinite(audioIndex) ? Math.max(0, audioIndex) : 0;
+  const id = crypto
+    .createHash('sha1')
+    .update(`enc7:${requested}:${target}`)
+    .digest('hex')
+    .slice(0, 16);
   const existing = sessions.get(id);
   if (existing) return existing;
   let job = inflight.get(id);
@@ -268,7 +294,7 @@ async function ensureSession(target) {
         const error = new Error('FFMPEG_MISSING');
         throw error;
       }
-      const streams = await probeStreams(ffmpeg, target);
+      const streams = await probeCached(ffmpeg, target);
       const video = streams.video;
       const supported =
         video === 'h264' || video === 'avc' || video === 'hevc' || video === 'h265';
@@ -277,11 +303,15 @@ async function ensureSession(target) {
         error.streams = streams;
         throw error;
       }
+      const tracks = Array.isArray(streams.audioTracks) ? streams.audioTracks : [];
+      const picked = tracks.some((track) => track.index === requested) ? requested : 0;
       const session = {
         id,
         target,
         video,
-        audio: streams.audio,
+        audio: tracks[picked]?.codec || streams.audio,
+        audioIndex: picked,
+        audioTracks: tracks,
         duration: streams.duration,
         stepMs: 4000,
       };
@@ -374,7 +404,19 @@ async function sendSegment(req, res, session, index) {
 
 async function servePlaylistForTarget(req, res, target) {
   try {
-    const session = await ensureSession(target);
+    const parsed = requestUrl(req);
+    const requested = Number(parsed.searchParams.get('audio'));
+    if (parsed.searchParams.get('meta') === '1') {
+      const session = await ensureSession(target, 0);
+      sendJson(res, 200, {
+        audioTracks: session.audioTracks || [],
+      });
+      return;
+    }
+    const session = await ensureSession(
+      target,
+      Number.isFinite(requested) ? requested : 0,
+    );
     const first = loadSegment(session, 0);
     loadSegment(session, 1).catch(() => {});
     try {

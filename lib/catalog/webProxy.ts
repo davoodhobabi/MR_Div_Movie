@@ -51,9 +51,11 @@ export function webMediaStreamUrl(targetUrl: string): string {
   return `${IRAN_STREAM_ORIGIN}${rel}`;
 }
 
-/** HLS playlist for iPhone Safari. Same host rules as the remux stream. */
-export function webMediaHlsUrl(targetUrl: string): string {
-  const rel = `/api/media-hls?url=${encodeURIComponent(targetUrl)}`;
+/** HLS playlist for browsers that cannot play MKV. `audioIndex` selects a dubbed track. */
+export function webMediaHlsUrl(targetUrl: string, audioIndex = 0): string {
+  const audio =
+    Number.isFinite(audioIndex) && audioIndex > 0 ? `&audio=${audioIndex}` : '';
+  const rel = `/api/media-hls?url=${encodeURIComponent(targetUrl)}${audio}`;
   if (Platform.OS !== 'web') return rel;
   if (typeof window === 'undefined') return rel;
 
@@ -65,6 +67,10 @@ export function webMediaHlsUrl(targetUrl: string): string {
     return rel;
   }
   return `${IRAN_STREAM_ORIGIN}${rel}`;
+}
+
+export function webMediaHlsMetaUrl(targetUrl: string): string {
+  return `${webMediaHlsUrl(targetUrl)}&meta=1`;
 }
 
 /** `{ ffmpeg: true }` only when this host can actually run ffmpeg. */
