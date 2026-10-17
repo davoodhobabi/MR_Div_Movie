@@ -369,6 +369,7 @@ export function WebPlayerControls({
     finishTap(gesture.zone);
   };
 
+  const compact = !fullscreen && isTouchDevice();
   const progress =
     duration > 0 ? Math.min(1, Math.max(0, currentTime / duration)) : 0;
   const loud = !muted && volume > 0;
@@ -435,9 +436,18 @@ export function WebPlayerControls({
               onPress={onTogglePlay}
               accessibilityRole="button"
               accessibilityLabel={strings.playerPlayLabel}
-              style={({ pressed }) => [styles.centerPlay, pressed && styles.pressed]}
+              style={({ pressed }) => [
+                styles.centerPlay,
+                compact && styles.centerPlayCompact,
+                pressed && styles.pressed,
+              ]}
             >
-              <Ionicons name="play" size={34} color="#fff" style={styles.playNudge} />
+              <Ionicons
+                name="play"
+                size={compact ? 22 : 34}
+                color="#fff"
+                style={styles.playNudge}
+              />
             </Pressable>
           </View>
         ) : null}
@@ -445,7 +455,7 @@ export function WebPlayerControls({
         <LinearGradient
           colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.45)', 'rgba(0,0,0,0.82)']}
           locations={[0, 0.42, 1]}
-          style={styles.shade}
+          style={[styles.shade, compact && styles.shadeCompact]}
           pointerEvents="box-none"
         >
           <View ref={dockRef} pointerEvents="box-none">
@@ -516,8 +526,9 @@ export function WebPlayerControls({
             </View>
           ) : null}
 
-          <View style={styles.bar}>
+          <View style={[styles.bar, compact && styles.barCompact]}>
           <SeekBar
+            compact={compact}
             progress={progress}
             duration={duration}
             onSeek={onSeek}
@@ -536,9 +547,10 @@ export function WebPlayerControls({
               icon={playing ? 'pause' : 'play'}
               label={playing ? strings.playerPauseLabel : strings.playerPlayLabel}
               large
+              compact={compact}
               onPress={onTogglePlay}
             />
-            <Text style={styles.time}>
+            <Text style={[styles.time, compact && styles.timeCompact]}>
               {formatClock(currentTime)}
               <Text style={styles.timeDim}> / {formatClock(duration)}</Text>
             </Text>
@@ -557,6 +569,7 @@ export function WebPlayerControls({
                 icon={volumeIcon}
                 label={strings.playerVolumeSettings}
                 active={!loud}
+                compact={compact}
                 onPress={() => toggleMenu('volume')}
               />
             </View>
@@ -564,12 +577,14 @@ export function WebPlayerControls({
               icon="headset"
               label={strings.playerChangeAudio}
               active={menu === 'audio'}
+              compact={compact}
               onPress={() => toggleMenu('audio')}
             />
             <IconButton
               icon="text"
               label={strings.playerChangeSubtitle}
               active={menu === 'subs' || subtitleId != null}
+              compact={compact}
               onPress={() => toggleMenu('subs')}
             />
             <Pressable
@@ -578,17 +593,25 @@ export function WebPlayerControls({
               accessibilityLabel={strings.playerSpeedLabel(rate)}
               style={({ pressed }) => [
                 styles.rateBtn,
+                compact && styles.rateBtnCompact,
                 (menu === 'speed' || rate !== 1) && styles.rateBtnOn,
                 pressed && styles.pressed,
               ]}
             >
-              <Text style={[styles.rateText, rate !== 1 && styles.rateTextOn]}>
+              <Text
+                style={[
+                  styles.rateText,
+                  compact && styles.rateTextCompact,
+                  rate !== 1 && styles.rateTextOn,
+                ]}
+              >
                 {faNum(rate)}×
               </Text>
             </Pressable>
             <IconButton
               icon={fullscreen ? 'contract' : 'expand'}
               label={fullscreen ? strings.playerExitFullscreen : strings.playerFullscreenLabel}
+              compact={compact}
               onPress={onToggleFullscreen}
             />
           </View>
@@ -606,22 +629,31 @@ function IconButton({
   onPress,
   active,
   large,
+  compact,
 }: {
   icon: keyof typeof Ionicons.glyphMap;
   label: string;
   onPress: () => void;
   active?: boolean;
   large?: boolean;
+  compact?: boolean;
 }) {
+  const size = compact ? (large ? 18 : 15) : large ? 26 : 22;
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={label}
-      hitSlop={6}
-      style={({ pressed }) => [styles.iconBtn, large && styles.iconBtnLarge, pressed && styles.pressed]}
+      hitSlop={compact ? 4 : 6}
+      style={({ pressed }) => [
+        styles.iconBtn,
+        large && styles.iconBtnLarge,
+        compact && styles.iconBtnCompact,
+        compact && large && styles.iconBtnLargeCompact,
+        pressed && styles.pressed,
+      ]}
     >
-      <Ionicons name={icon} size={large ? 26 : 22} color={active ? colors.accent : '#fff'} />
+      <Ionicons name={icon} size={size} color={active ? colors.accent : '#fff'} />
     </Pressable>
   );
 }
@@ -649,12 +681,14 @@ function SheetRow({
 }
 
 function SeekBar({
+  compact,
   progress,
   duration,
   onSeek,
   onDragStart,
   onDragEnd,
 }: {
+  compact?: boolean;
   progress: number;
   duration: number;
   onSeek: (time: number) => void;
@@ -676,7 +710,7 @@ function SeekBar({
     <View
       ref={ref}
       {...ltrProps}
-      style={styles.seek}
+      style={[styles.seek, compact && styles.seekCompact]}
       onStartShouldSetResponder={() => true}
       onMoveShouldSetResponder={() => true}
       onResponderGrant={(event) => {
@@ -687,10 +721,16 @@ function SeekBar({
       onResponderRelease={onDragEnd}
       onResponderTerminate={onDragEnd}
     >
-      <View style={styles.seekRail}>
+      <View style={[styles.seekRail, compact && styles.seekRailCompact]}>
         <View style={[styles.seekFill, { width: `${progress * 100}%` }]} />
       </View>
-      <View style={[styles.knob, { left: `${progress * 100}%` }]} />
+      <View
+        style={[
+          styles.knob,
+          compact && styles.knobCompact,
+          { left: `${progress * 100}%` },
+        ]}
+      />
     </View>
   );
 }
@@ -814,6 +854,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.28)',
   },
+  centerPlayCompact: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+  },
   playNudge: {
     marginLeft: 4,
   },
@@ -821,6 +866,11 @@ const styles = StyleSheet.create({
     paddingTop: 48,
     paddingBottom: 10,
     paddingHorizontal: 10,
+  },
+  shadeCompact: {
+    paddingTop: 22,
+    paddingBottom: 4,
+    paddingHorizontal: 6,
   },
   bar: {
     borderRadius: 16,
@@ -830,6 +880,12 @@ const styles = StyleSheet.create({
     paddingTop: 2,
     paddingBottom: 4,
     paddingHorizontal: 4,
+  },
+  barCompact: {
+    borderRadius: 12,
+    paddingTop: 0,
+    paddingBottom: 1,
+    paddingHorizontal: 2,
   },
   sheet: {
     alignSelf: 'flex-start',
@@ -901,12 +957,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginHorizontal: 8,
   },
+  seekCompact: {
+    height: 14,
+    marginHorizontal: 6,
+  },
   seekRail: {
     position: 'relative',
     height: 4,
     borderRadius: 2,
     backgroundColor: 'rgba(255,255,255,0.35)',
     overflow: 'hidden',
+  },
+  seekRailCompact: {
+    height: 3,
   },
   seekFill: {
     position: 'absolute',
@@ -924,6 +987,13 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     top: 5,
   },
+  knobCompact: {
+    width: 8,
+    height: 8,
+    marginLeft: -4,
+    borderRadius: 4,
+    top: 3,
+  },
   row: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
@@ -937,6 +1007,10 @@ const styles = StyleSheet.create({
     fontFamily: fonts.medium,
     fontSize: 12,
     marginHorizontal: 4,
+  },
+  timeCompact: {
+    fontSize: 10,
+    marginHorizontal: 2,
   },
   timeDim: {
     color: 'rgba(255,255,255,0.62)',
@@ -952,6 +1026,14 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
   },
+  iconBtnCompact: {
+    width: 26,
+    height: 26,
+  },
+  iconBtnLargeCompact: {
+    width: 28,
+    height: 28,
+  },
   rateBtn: {
     minWidth: 36,
     height: 28,
@@ -960,6 +1042,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  rateBtnCompact: {
+    minWidth: 26,
+    height: 22,
+    paddingHorizontal: 3,
+    borderRadius: 6,
+  },
   rateBtnOn: {
     backgroundColor: 'rgba(229,9,20,0.22)',
   },
@@ -967,6 +1055,9 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontFamily: fonts.bold,
     fontSize: 13,
+  },
+  rateTextCompact: {
+    fontSize: 11,
   },
   rateTextOn: {
     color: colors.accent,
