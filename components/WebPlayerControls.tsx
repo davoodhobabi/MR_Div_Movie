@@ -162,7 +162,8 @@ export function WebPlayerControls({
     const place = (lift: boolean) => {
       if (cancelled) return;
       if (!lift) {
-        placeWebSubtitles(video, null);
+        // Keep a little air above the bottom edge when the dock is hidden.
+        placeWebSubtitles(video, 28);
         return;
       }
       const dock = dockRef.current as unknown as HTMLElement | null;
@@ -180,7 +181,7 @@ export function WebPlayerControls({
       restoreTimer = setTimeout(() => place(false), 480);
     }
     const onCue = () => {
-      if (shownRef.current) place(true);
+      place(shownRef.current);
     };
     const bind = (track: TextTrack) => track.addEventListener('cuechange', onCue);
     const unbind = (track: TextTrack) => track.removeEventListener('cuechange', onCue);
@@ -192,7 +193,7 @@ export function WebPlayerControls({
       const track = (event as TrackEvent).track;
       if (!track) return;
       bind(track);
-      if (shownRef.current) place(true);
+      place(shownRef.current);
     };
     video.textTracks.addEventListener('addtrack', onAdd);
     return () => {
@@ -211,6 +212,11 @@ export function WebPlayerControls({
     reveal();
   };
 
+  const isTouchDevice = () =>
+    typeof window !== 'undefined' &&
+    window.matchMedia('(pointer: coarse)').matches &&
+    window.matchMedia('(hover: none)').matches;
+
   const onSurface = () => {
     const wasShown = shownRef.current;
     reveal();
@@ -222,10 +228,37 @@ export function WebPlayerControls({
   const tapRef = useRef({ at: 0, zone: 'center' as 'left' | 'center' | 'right' });
   const singleTapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const nudgeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const gestureRef = useRef<{
+    x: number;
+    y: number;
+    zone: 'left' | 'center' | 'right';
+    mode: 'none' | 'volume' | 'brightness';
+    startVolume: number;
+    startBrightness: number;
+  } | null>(null);
+  const volumeRef = useRef(volume);
+  volumeRef.current = volume;
   const [nudge, setNudge] = useState<'back' | 'forward' | null>(null);
+  const [brightness, setBrightness] = useState(1);
+  const brightnessRef = useRef(1);
+  const [scrubHud, setScrubHud] = useState<{
+    kind: 'volume' | 'brightness';
+    value: number;
+  } | null>(null);
+
   if (Math.abs(currentTime - anchorRef.current) < 1.5) {
     anchorRef.current = currentTime;
   }
+
+  useEffect(() => {
+    const root = rootRef.current as unknown as HTMLElement | null;
+    const video = root?.parentElement?.querySelector('video') as HTMLVideoElement | null;
+    if (!video) return;
+    video.style.filter = `brightness(${brightness})`;
+    return () => {
+      video.style.filter = '';
+    };
+  }, [brightness]);
 
   const jump = (dir: 'back' | 'forward') => {
     const delta = dir === 'back' ? -20 : 20;
@@ -239,26 +272,31 @@ export function WebPlayerControls({
     reveal();
   };
 
-  const zoneFromEvent = (event: GestureResponderEvent) => {
+  const pointFromEvent = (event: GestureResponderEvent) => {
     const node = rootRef.current as unknown as HTMLElement | null;
     const box = node?.getBoundingClientRect?.();
     const pageX = event.nativeEvent.pageX;
+    const pageY = event.nativeEvent.pageY;
     const x =
       box && typeof pageX === 'number'
         ? pageX - box.left
         : event.nativeEvent.locationX;
-    const ratio = x / (box?.width || 1);
+    const y =
+      box && typeof pageY === 'number'
+        ? pageY - box.top
+        : event.nativeEvent.locationY;
+    return { x, y, height: box?.height || 1, width: box?.width || 1 };
+  };
+
+  const zoneFromPoint = (x: number, width: number) => {
+    const ratio = x / (width || 1);
     if (ratio < 0.38) return 'left' as const;
     if (ratio > 0.62) return 'right' as const;
     return 'center' as const;
   };
 
-  const onSurfacePress = (event: GestureResponderEvent) => {
-    const zone = zoneFromEvent(event);
-    const touch =
-      typeof window !== 'undefined' &&
-      window.matchMedia('(pointer: coarse)').matches &&
-      window.matchMedia('(hover: none)').matches;
+  const finishTap = (zone: 'left' | 'center' | 'right') => {
+    const touch = isTouchDevice();
     if (!touch) {
       if (zone === 'left') jump('back');
       else if (zone === 'right') jump('forward');
@@ -273,7 +311,62 @@ export function WebPlayerControls({
       jump(zone === 'left' ? 'back' : 'forward');
       return;
     }
-    singleTapTimer.current = setTimeout(() => onSurface(), 280);
+    // Mobile single tap: only show controls, never play/pause.
+    singleTapTimer.current = setTimeout(() => reveal(), 280);
+  };
+
+  const onCatcherGrant = (event: GestureResponderEvent) => {
+    if (singleTapTimer.current) clearTimeout(singleTapTimer.current);
+    const point = pointFromEvent(event);
+    const zone = zoneFromPoint(point.x, point.width);
+    gestureRef.current = {
+      x: point.x,
+      y: point.y,
+      zone,
+      mode: 'none',
+      startVolume: muted ? 0 : volumeRef.current,
+      startBrightness: brightnessRef.current,
+    };
+  };
+
+  const onCatcherMove = (event: GestureResponderEvent) => {
+    const gesture = gestureRef.current;
+    if (!gesture) return;
+    const point = pointFromEvent(event);
+    const dx = point.x - gesture.x;
+    const dy = point.y - gesture.y;
+    if (gesture.mode === 'none') {
+      if (Math.abs(dy) < 12 || Math.abs(dy) <= Math.abs(dx) * 1.2) return;
+      if (gesture.zone === 'left') gesture.mode = 'volume';
+      else if (gesture.zone === 'right') gesture.mode = 'brightness';
+      else return;
+      if (hideTimer.current) clearTimeout(hideTimer.current);
+    }
+    const delta = -dy / Math.max(160, point.height * 0.55);
+    if (gesture.mode === 'volume') {
+      const next = Math.min(1, Math.max(0, gesture.startVolume + delta));
+      onVolume(next);
+      setScrubHud({ kind: 'volume', value: next });
+      return;
+    }
+    if (gesture.mode === 'brightness') {
+      const next = Math.min(1.4, Math.max(0.2, gesture.startBrightness + delta));
+      brightnessRef.current = next;
+      setBrightness(next);
+      setScrubHud({ kind: 'brightness', value: (next - 0.2) / 1.2 });
+    }
+  };
+
+  const onCatcherRelease = (event: GestureResponderEvent) => {
+    const gesture = gestureRef.current;
+    gestureRef.current = null;
+    if (!gesture) return;
+    if (gesture.mode !== 'none') {
+      setScrubHud(null);
+      armHide();
+      return;
+    }
+    finishTap(gesture.zone);
   };
 
   const progress =
@@ -287,11 +380,17 @@ export function WebPlayerControls({
 
   return (
     <View ref={rootRef} style={styles.root} pointerEvents="box-none">
-      <Pressable
+      <View
         style={styles.catcher}
-        onPress={onSurfacePress}
+        onStartShouldSetResponder={() => true}
+        onMoveShouldSetResponder={() => true}
+        onResponderTerminationRequest={() => false}
+        onResponderGrant={onCatcherGrant}
+        onResponderMove={onCatcherMove}
+        onResponderRelease={onCatcherRelease}
+        onResponderTerminate={onCatcherRelease}
         accessibilityRole="button"
-        accessibilityLabel={playing ? strings.playerPauseLabel : strings.playerPlayLabel}
+        accessibilityLabel={strings.playerPlayLabel}
       />
       {nudge ? (
         <View
@@ -300,6 +399,29 @@ export function WebPlayerControls({
         >
           <Text style={styles.nudgeText}>
             {nudge === 'back' ? `−${faNum(20)}` : `+${faNum(20)}`}
+          </Text>
+        </View>
+      ) : null}
+      {scrubHud ? (
+        <View {...ltrProps} pointerEvents="none" style={styles.scrubHud}>
+          <Ionicons
+            name={
+              scrubHud.kind === 'volume'
+                ? scrubHud.value === 0
+                  ? 'volume-mute'
+                  : scrubHud.value < 0.45
+                    ? 'volume-low'
+                    : 'volume-high'
+                : 'sunny'
+            }
+            size={28}
+            color="#fff"
+          />
+          <View style={styles.scrubRail}>
+            <View style={[styles.scrubFill, { height: `${scrubHud.value * 100}%` }]} />
+          </View>
+          <Text style={styles.scrubPct}>
+            {faNum(Math.round(scrubHud.value * 100))}
           </Text>
         </View>
       ) : null}
@@ -614,6 +736,39 @@ const styles = StyleSheet.create({
   },
   catcher: {
     ...StyleSheet.absoluteFill,
+    // Prevent the page from scrolling while adjusting volume/brightness.
+    // @ts-expect-error web-only CSS
+    touchAction: 'none',
+  },
+  scrubHud: {
+    position: 'absolute',
+    top: '28%',
+    left: '50%',
+    marginLeft: -28,
+    width: 56,
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    borderRadius: 16,
+    backgroundColor: 'rgba(7,8,12,0.72)',
+    zIndex: 3,
+  },
+  scrubRail: {
+    width: 4,
+    height: 88,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.22)',
+    overflow: 'hidden',
+    justifyContent: 'flex-end',
+  },
+  scrubFill: {
+    width: '100%',
+    backgroundColor: '#fff',
+  },
+  scrubPct: {
+    color: '#fff',
+    fontFamily: fonts.medium,
+    fontSize: 12,
   },
   nudge: {
     position: 'absolute',
