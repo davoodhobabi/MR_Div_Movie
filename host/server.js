@@ -21,6 +21,11 @@ const DIST = path.join(__dirname, 'dist');
 const ALLOWED =
   /^https:\/\/(dls\d*\.aparatchi-dlcenter\.top|\S+\.hashuresport\.com)\//i;
 
+/** Served from dist/downloads after the web export (public/downloads). */
+const DOWNLOAD_FILES = {
+  '/downloads/android-tv.apk': 'android-tv.apk',
+};
+
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -38,6 +43,7 @@ const MIME = {
   '.woff2': 'font/woff2',
   '.ttf': 'font/ttf',
   '.txt': 'text/plain; charset=utf-8',
+  '.apk': 'application/vnd.android.package-archive',
 };
 
 function log(...args) {
@@ -127,6 +133,38 @@ async function handleSubtitles(req, res, parsed) {
   return true;
 }
 
+function handleDownloads(req, res, parsed) {
+  const mapped = DOWNLOAD_FILES[parsed.pathname];
+  if (!mapped) return false;
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.statusCode = 405;
+    res.end('METHOD');
+    return true;
+  }
+  const downloadsDir = path.join(DIST, 'downloads');
+  const filePath = path.join(downloadsDir, mapped);
+  if (!filePath.startsWith(downloadsDir) || !fs.existsSync(filePath)) {
+    res.statusCode = 404;
+    res.end('NOT_FOUND');
+    return true;
+  }
+  const stat = fs.statSync(filePath);
+  res.statusCode = 200;
+  res.setHeader('Content-Type', MIME['.apk']);
+  res.setHeader('Content-Length', String(stat.size));
+  res.setHeader(
+    'Content-Disposition',
+    `attachment; filename="${path.basename(parsed.pathname)}"`,
+  );
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  if (req.method === 'HEAD') {
+    res.end();
+    return true;
+  }
+  fs.createReadStream(filePath).pipe(res);
+  return true;
+}
+
 function handleStatic(req, res, parsed) {
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     res.statusCode = 405;
@@ -164,6 +202,10 @@ const server = http.createServer((req, res) => {
     .then((handled) => (handled ? true : handleMediaRange(req, res)))
     .then((handled) => (handled ? true : handleMediaStream(req, res)))
     .then((handled) => (handled ? true : handleMediaHls(req, res)))
+    .then((handled) => {
+      if (handled) return true;
+      return handleDownloads(req, res, parsed);
+    })
     .then((handled) => {
       if (handled) return;
       handleStatic(req, res, parsed);

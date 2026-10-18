@@ -2,6 +2,7 @@ import { useEventListener } from 'expo';
 import {
   useVideoPlayer,
   VideoView,
+  type AudioTrack,
   type SubtitleTrack,
 } from 'expo-video';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -28,7 +29,10 @@ import {
 } from '../lib/catalog/videoSource';
 import { webMediaHlsMetaUrl, webMediaHlsUrl } from '../lib/catalog/webProxy';
 import { attachWebHls } from '../lib/player/attachWebHls';
-import { pickPreferredSubtitle } from '../lib/player/subtitlePicker';
+import {
+  pickPreferredSubtitle,
+  subtitleLabel,
+} from '../lib/player/subtitlePicker';
 import {
   disposeWebVideoSubtitles,
   loadWebVideoSubtitles,
@@ -36,6 +40,21 @@ import {
   selectWebSubtitle,
 } from '../lib/player/webSubtitleTracks';
 import { WebPlayerControls } from './WebPlayerControls';
+
+const useCustomControls = Platform.OS === 'web' || Platform.OS === 'android';
+
+function nativeAudioAsRemote(tracks: AudioTrack[]): RemoteAudioTrack[] {
+  return tracks.map((track, index) => ({
+    index,
+    language: track.language,
+    title: track.name || track.label,
+    default: track.isDefault,
+  }));
+}
+
+function trackKey(track: { id?: string; language?: string; label?: string; name?: string }) {
+  return track.id || `${track.language || ''}:${track.label || track.name || ''}`;
+}
 
 type VideoPlayerProps = {
   uri: string;
@@ -64,6 +83,7 @@ export function VideoPlayer({
   const webHls = webNeedsHls(uri);
   const [audioIndex, setAudioIndex] = useState(0);
   const [audioTracks, setAudioTracks] = useState<RemoteAudioTrack[]>([]);
+  const [nativeAudioTracks, setNativeAudioTracks] = useState<AudioTrack[]>([]);
   const [playing, setPlaying] = useState(true);
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
@@ -74,7 +94,17 @@ export function VideoPlayer({
   const sourceUrl = webHls
     ? webMediaHlsUrl(originalUrl, audioIndex)
     : originalUrl;
-  const audioLabels = useMemo(() => audioTrackLabels(audioTracks), [audioTracks]);
+  const labeledAudioTracks = useMemo(
+    () =>
+      webHls
+        ? audioTracks
+        : nativeAudioAsRemote(nativeAudioTracks),
+    [webHls, audioTracks, nativeAudioTracks],
+  );
+  const audioLabels = useMemo(
+    () => audioTrackLabels(labeledAudioTracks),
+    [labeledAudioTracks],
+  );
   const selectedRef = useRef(false);
   const didSeekRef = useRef(false);
   const startedRef = useRef(false);
@@ -102,8 +132,13 @@ export function VideoPlayer({
     pendingSeekRef.current = 0;
     setAudioIndex(0);
     setAudioTracks([]);
+    setNativeAudioTracks([]);
+    setSubtitles([]);
+    setSubtitleId(null);
     setPlaying(true);
     setRate(1);
+    setVolume(1);
+    setMuted(false);
     setLoading(true);
     setError(null);
   }, [uri, onFullscreenChange]);
@@ -243,7 +278,7 @@ export function VideoPlayer({
   }, [player]);
 
   useEffect(() => {
-    if (Platform.OS !== 'web') return;
+    if (!useCustomControls) return;
     try {
       player.playbackRate = rate;
       player.volume = muted ? 0 : volume;
@@ -254,21 +289,42 @@ export function VideoPlayer({
   }, [player, rate, volume, muted, sourceUrl]);
 
   useEffect(() => {
-    if (Platform.OS !== 'web') return;
+    if (!useCustomControls) return;
     const timer = setInterval(() => {
       try {
         setClock({
           currentTime: player.currentTime || 0,
           duration: Number.isFinite(player.duration) ? player.duration : 0,
         });
-        const node = boxRef.current as unknown as {
-          querySelector?: (selector: string) => HTMLVideoElement | null;
-        };
-        const video = node?.querySelector?.('video');
-        if (!video) return;
-        const snapshot = readWebSubtitles(video);
-        setSubtitles(snapshot.options);
-        setSubtitleId(snapshot.activeId);
+        if (Platform.OS === 'web') {
+          const node = boxRef.current as unknown as {
+            querySelector?: (selector: string) => HTMLVideoElement | null;
+          };
+          const video = node?.querySelector?.('video');
+          if (!video) return;
+          const snapshot = readWebSubtitles(video);
+          setSubtitles(snapshot.options);
+          setSubtitleId(snapshot.activeId);
+          return;
+        }
+        const tracks = player.availableSubtitleTracks || [];
+        setSubtitles(
+          tracks.map((track) => ({
+            id: trackKey(track),
+            label: subtitleLabel(track) || strings.playerSubtitlesOn,
+          })),
+        );
+        const active = player.subtitleTrack;
+        setSubtitleId(active ? trackKey(active) : null);
+        const audios = player.availableAudioTracks || [];
+        if (audios.length) {
+          setNativeAudioTracks(audios);
+          const current = player.audioTrack;
+          const index = current
+            ? audios.findIndex((track) => trackKey(track) === trackKey(current))
+            : 0;
+          setAudioIndex(index >= 0 ? index : 0);
+        }
       } catch {
         // Player may already be released.
       }
@@ -315,9 +371,18 @@ export function VideoPlayer({
   useEventListener(
     player,
     'sourceLoad',
-    ({ availableSubtitleTracks }: { availableSubtitleTracks: SubtitleTrack[] }) => {
+    ({
+      availableSubtitleTracks,
+      availableAudioTracks,
+    }: {
+      availableSubtitleTracks: SubtitleTrack[];
+      availableAudioTracks: AudioTrack[];
+    }) => {
       selectedRef.current = false;
       selectPreferredSubtitle(availableSubtitleTracks);
+      if (Platform.OS !== 'web') {
+        setNativeAudioTracks(availableAudioTracks || []);
+      }
     },
   );
 
@@ -330,6 +395,15 @@ export function VideoPlayer({
       availableSubtitleTracks: SubtitleTrack[];
     }) => {
       selectPreferredSubtitle(availableSubtitleTracks);
+    },
+  );
+
+  useEventListener(
+    player,
+    'availableAudioTracksChange',
+    ({ availableAudioTracks }: { availableAudioTracks: AudioTrack[] }) => {
+      if (Platform.OS === 'web') return;
+      setNativeAudioTracks(availableAudioTracks || []);
     },
   );
 
@@ -415,12 +489,31 @@ export function VideoPlayer({
   };
 
   const changeSubtitle = (id: string | null) => {
-    const node = boxRef.current as unknown as {
-      querySelector?: (selector: string) => HTMLVideoElement | null;
-    };
-    const video = node?.querySelector?.('video');
-    if (video) selectWebSubtitle(video, id);
-    setSubtitleId(id);
+    selectedRef.current = true;
+    if (Platform.OS === 'web') {
+      const node = boxRef.current as unknown as {
+        querySelector?: (selector: string) => HTMLVideoElement | null;
+      };
+      const video = node?.querySelector?.('video');
+      if (video) selectWebSubtitle(video, id);
+      setSubtitleId(id);
+      return;
+    }
+    try {
+      if (id == null) {
+        player.subtitleTrack = null;
+        setSubtitleId(null);
+        return;
+      }
+      const track = (player.availableSubtitleTracks || []).find(
+        (item) => trackKey(item) === id,
+      );
+      if (!track) return;
+      player.subtitleTrack = track;
+      setSubtitleId(id);
+    } catch {
+      // Ignore until tracks are ready.
+    }
   };
 
   const toggleFullscreen = () => {
@@ -457,15 +550,27 @@ export function VideoPlayer({
     });
   };
 
-  const selectAudio = (index: number) => {
-    if (index === audioIndex) return;
-    try {
-      pendingSeekRef.current = player.currentTime || 0;
-    } catch {
-      pendingSeekRef.current = 0;
+  const selectAudio = (position: number) => {
+    if (webHls) {
+      const track = audioTracks[position];
+      if (!track || track.index === audioIndex) return;
+      try {
+        pendingSeekRef.current = player.currentTime || 0;
+      } catch {
+        pendingSeekRef.current = 0;
+      }
+      setLoading(true);
+      setAudioIndex(track.index);
+      return;
     }
-    setLoading(true);
-    setAudioIndex(index);
+    const track = nativeAudioTracks[position];
+    if (!track) return;
+    try {
+      player.audioTrack = track;
+      setAudioIndex(position);
+    } catch {
+      // Ignore until tracks are ready.
+    }
   };
 
   return (
@@ -478,7 +583,7 @@ export function VideoPlayer({
         ref={viewRef}
         style={styles.video}
         player={player}
-        nativeControls={Platform.OS !== 'web'}
+        nativeControls={!useCustomControls}
         playsInline
         fullscreenOptions={{ enable: true, orientation: 'landscape' }}
         allowsPictureInPicture={false}
@@ -502,7 +607,7 @@ export function VideoPlayer({
           </Text>
         </View>
       ) : null}
-      {Platform.OS === 'web' && !error ? (
+      {useCustomControls && !error ? (
         <WebPlayerControls
           playing={playing}
           onTogglePlay={togglePlay}
@@ -510,11 +615,15 @@ export function VideoPlayer({
           muted={muted}
           onVolume={changeVolume}
           audioLabels={audioLabels}
-          audioIndex={audioIndex}
-          onSelectAudio={(position) => {
-            const track = audioTracks[position];
-            if (track) selectAudio(track.index);
-          }}
+          audioIndex={
+            webHls
+              ? Math.max(
+                  0,
+                  audioTracks.findIndex((track) => track.index === audioIndex),
+                )
+              : audioIndex
+          }
+          onSelectAudio={selectAudio}
           subtitles={subtitles}
           subtitleId={subtitleId}
           onSelectSubtitle={changeSubtitle}

@@ -15,8 +15,9 @@ function setGradleProperty(modResults, key, value) {
 }
 
 /**
- * Adds NextLib FFmpeg soft-decoders to expo-video and keeps release APKs
- * to 64-bit phones only (drops 32-bit / emulator ABIs that bloat size).
+ * Adds NextLib FFmpeg soft-decoders to expo-video.
+ * Ships both 32-bit and 64-bit ARM so Android TV boxes can install the APK.
+ * Drops x86 / x86_64 emulator ABIs that only bloat sideload builds.
  */
 function withFfmpegDecoders(config) {
   config = withDangerousMod(config, [
@@ -28,7 +29,13 @@ function withFfmpegDecoders(config) {
   ]);
 
   config = withGradleProperties(config, (cfg) => {
-    setGradleProperty(cfg.modResults, 'reactNativeArchitectures', 'arm64-v8a');
+    setGradleProperty(
+      cfg.modResults,
+      'reactNativeArchitectures',
+      'armeabi-v7a,arm64-v8a',
+    );
+    // Many TV firmwares fail install when native libs are not extracted.
+    setGradleProperty(cfg.modResults, 'expo.useLegacyPackaging', 'true');
     return cfg;
   });
 
@@ -38,5 +45,5 @@ function withFfmpegDecoders(config) {
 module.exports = createRunOncePlugin(
   withFfmpegDecoders,
   'with-ffmpeg-decoders',
-  '1.1.1',
+  '1.2.0',
 );

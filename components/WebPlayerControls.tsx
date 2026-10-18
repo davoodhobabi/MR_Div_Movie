@@ -1,9 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ComponentProps } from 'react';
 import {
   Animated,
   Easing,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -14,6 +15,8 @@ import { strings } from '../constants/strings';
 import { colors, fonts } from '../constants/theme';
 import { placeWebSubtitles } from '../lib/player/webSubtitleTracks';
 import { ltrProps } from '../lib/rtl';
+import { isAndroidTv } from '../lib/tv';
+import { TvPressable } from './TvPressable';
 
 type Menu = 'volume' | 'audio' | 'subs' | 'speed' | null;
 
@@ -133,12 +136,17 @@ export function WebPlayerControls({
   revealRef.current = reveal;
 
   useEffect(() => {
+    armHide();
+    if (Platform.OS !== 'web') {
+      return () => {
+        if (hideTimer.current) clearTimeout(hideTimer.current);
+      };
+    }
     const node = rootRef.current as unknown as HTMLElement | null;
     if (!node?.addEventListener) return;
     const onActivity = () => revealRef.current();
     node.addEventListener('pointermove', onActivity);
     node.addEventListener('pointerdown', onActivity);
-    armHide();
     return () => {
       node.removeEventListener('pointermove', onActivity);
       node.removeEventListener('pointerdown', onActivity);
@@ -155,6 +163,7 @@ export function WebPlayerControls({
   }, [menu]);
 
   useEffect(() => {
+    if (Platform.OS !== 'web') return;
     const root = rootRef.current as unknown as HTMLElement | null;
     const video = root?.parentElement?.querySelector('video') ?? null;
     if (!video) return;
@@ -212,10 +221,16 @@ export function WebPlayerControls({
     reveal();
   };
 
-  const isTouchDevice = () =>
-    typeof window !== 'undefined' &&
-    window.matchMedia('(pointer: coarse)').matches &&
-    window.matchMedia('(hover: none)').matches;
+  const tvMode = isAndroidTv();
+  const isTouchDevice = () => {
+    if (tvMode) return false;
+    if (Platform.OS === 'android' || Platform.OS === 'ios') return true;
+    return (
+      typeof window !== 'undefined' &&
+      window.matchMedia('(pointer: coarse)').matches &&
+      window.matchMedia('(hover: none)').matches
+    );
+  };
 
   const onSurface = () => {
     const wasShown = shownRef.current;
@@ -251,6 +266,7 @@ export function WebPlayerControls({
   }
 
   useEffect(() => {
+    if (Platform.OS !== 'web') return;
     const root = rootRef.current as unknown as HTMLElement | null;
     const video = root?.parentElement?.querySelector('video') as HTMLVideoElement | null;
     if (!video) return;
@@ -296,6 +312,10 @@ export function WebPlayerControls({
   };
 
   const finishTap = (zone: 'left' | 'center' | 'right') => {
+    if (tvMode) {
+      onSurface();
+      return;
+    }
     const touch = isTouchDevice();
     if (!touch) {
       if (zone === 'left') jump('back');
@@ -330,6 +350,7 @@ export function WebPlayerControls({
   };
 
   const onCatcherMove = (event: GestureResponderEvent) => {
+    if (tvMode) return;
     const gesture = gestureRef.current;
     if (!gesture) return;
     const point = pointFromEvent(event);
@@ -357,7 +378,7 @@ export function WebPlayerControls({
     }
   };
 
-  const onCatcherRelease = (event: GestureResponderEvent) => {
+  const onCatcherRelease = () => {
     const gesture = gestureRef.current;
     gestureRef.current = null;
     if (!gesture) return;
@@ -369,7 +390,8 @@ export function WebPlayerControls({
     finishTap(gesture.zone);
   };
 
-  const compact = !fullscreen && isTouchDevice();
+  const compact = !fullscreen && isTouchDevice() && !tvMode;
+  const dimOverlay = Math.max(0, Math.min(0.75, 1 - brightness));
   const progress =
     duration > 0 ? Math.min(1, Math.max(0, currentTime / duration)) : 0;
   const loud = !muted && volume > 0;
@@ -384,7 +406,7 @@ export function WebPlayerControls({
       <View
         style={styles.catcher}
         onStartShouldSetResponder={() => true}
-        onMoveShouldSetResponder={() => true}
+        onMoveShouldSetResponder={() => !tvMode}
         onResponderTerminationRequest={() => false}
         onResponderGrant={onCatcherGrant}
         onResponderMove={onCatcherMove}
@@ -393,6 +415,12 @@ export function WebPlayerControls({
         accessibilityRole="button"
         accessibilityLabel={strings.playerPlayLabel}
       />
+      {Platform.OS !== 'web' && dimOverlay > 0.02 ? (
+        <View
+          pointerEvents="none"
+          style={[styles.dimOverlay, { opacity: dimOverlay }]}
+        />
+      ) : null}
       {nudge ? (
         <View
           pointerEvents="none"
@@ -432,7 +460,7 @@ export function WebPlayerControls({
       >
         {!playing ? (
           <View style={styles.centerWrap} pointerEvents="box-none">
-            <Pressable
+            <ControlPressable
               onPress={onTogglePlay}
               accessibilityRole="button"
               accessibilityLabel={strings.playerPlayLabel}
@@ -448,7 +476,7 @@ export function WebPlayerControls({
                 color="#fff"
                 style={styles.playNudge}
               />
-            </Pressable>
+            </ControlPressable>
           </View>
         ) : null}
 
@@ -464,7 +492,7 @@ export function WebPlayerControls({
               {menu === 'speed' ? (
                 <View style={styles.speedRow}>
                   {SPEEDS.map((value) => (
-                    <Pressable
+                    <ControlPressable
                       key={value}
                       onPress={() => {
                         onRate(value);
@@ -477,7 +505,7 @@ export function WebPlayerControls({
                       <Text style={[styles.speedText, rate === value && styles.speedTextOn]}>
                         {faNum(value)}×
                       </Text>
-                    </Pressable>
+                    </ControlPressable>
                   ))}
                 </View>
               ) : null}
@@ -587,7 +615,7 @@ export function WebPlayerControls({
               compact={compact}
               onPress={() => toggleMenu('subs')}
             />
-            <Pressable
+            <ControlPressable
               onPress={() => toggleMenu('speed')}
               accessibilityRole="button"
               accessibilityLabel={strings.playerSpeedLabel(rate)}
@@ -607,7 +635,7 @@ export function WebPlayerControls({
               >
                 {faNum(rate)}×
               </Text>
-            </Pressable>
+            </ControlPressable>
             <IconButton
               icon={fullscreen ? 'contract' : 'expand'}
               label={fullscreen ? strings.playerExitFullscreen : strings.playerFullscreenLabel}
@@ -621,6 +649,13 @@ export function WebPlayerControls({
       </Animated.View>
     </View>
   );
+}
+
+function ControlPressable(props: ComponentProps<typeof Pressable>) {
+  if (isAndroidTv()) {
+    return <TvPressable {...props} />;
+  }
+  return <Pressable {...props} />;
 }
 
 function IconButton({
@@ -640,7 +675,7 @@ function IconButton({
 }) {
   const size = compact ? (large ? 18 : 15) : large ? 26 : 22;
   return (
-    <Pressable
+    <ControlPressable
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={label}
@@ -654,7 +689,7 @@ function IconButton({
       ]}
     >
       <Ionicons name={icon} size={size} color={active ? colors.accent : '#fff'} />
-    </Pressable>
+    </ControlPressable>
   );
 }
 
@@ -668,7 +703,7 @@ function SheetRow({
   onPress: () => void;
 }) {
   return (
-    <Pressable
+    <ControlPressable
       onPress={onPress}
       accessibilityRole="button"
       accessibilityState={{ selected }}
@@ -676,7 +711,7 @@ function SheetRow({
     >
       <Text style={[styles.sheetText, selected && styles.sheetTextOn]}>{label}</Text>
       {selected ? <Ionicons name="checkmark" size={16} color={colors.accent} /> : <View style={styles.checkSpacer} />}
-    </Pressable>
+    </ControlPressable>
   );
 }
 
@@ -695,22 +730,22 @@ function SeekBar({
   onDragStart: () => void;
   onDragEnd: () => void;
 }) {
-  const ref = useRef<View>(null);
-  const seekAt = (pageX: number) => {
-    const node = ref.current as unknown as HTMLElement | null;
-    const box = node?.getBoundingClientRect?.();
-    if (!box || box.width <= 0 || duration <= 0) return;
-    const ratio = Math.min(1, Math.max(0, (pageX - box.left) / box.width));
-    onSeek(ratio * duration);
-  };
+  const widthRef = useRef(1);
   const fromEvent = (event: GestureResponderEvent) => {
-    seekAt(event.nativeEvent.pageX);
+    if (duration <= 0 || widthRef.current <= 0) return;
+    const ratio = Math.min(
+      1,
+      Math.max(0, event.nativeEvent.locationX / widthRef.current),
+    );
+    onSeek(ratio * duration);
   };
   return (
     <View
-      ref={ref}
       {...ltrProps}
       style={[styles.seek, compact && styles.seekCompact]}
+      onLayout={(event) => {
+        widthRef.current = Math.max(1, event.nativeEvent.layout.width);
+      }}
       onStartShouldSetResponder={() => true}
       onMoveShouldSetResponder={() => true}
       onResponderGrant={(event) => {
@@ -742,24 +777,24 @@ function VerticalVolume({
   value: number;
   onChange: (value: number) => void;
 }) {
-  const ref = useRef<View>(null);
-  const at = (pageY: number) => {
-    const node = ref.current as unknown as HTMLElement | null;
-    const box = node?.getBoundingClientRect?.();
-    if (!box || box.height <= 0) return;
-    const ratio = 1 - (pageY - box.top) / box.height;
+  const heightRef = useRef(1);
+  const at = (event: GestureResponderEvent) => {
+    if (heightRef.current <= 0) return;
+    const ratio = 1 - event.nativeEvent.locationY / heightRef.current;
     onChange(Math.min(1, Math.max(0, ratio)));
   };
   return (
     <View style={styles.volumePop}>
       <Text style={styles.volumePct}>{faNum(Math.round(value * 100))}</Text>
       <View
-        ref={ref}
         style={styles.volumeTrack}
+        onLayout={(event) => {
+          heightRef.current = Math.max(1, event.nativeEvent.layout.height);
+        }}
         onStartShouldSetResponder={() => true}
         onMoveShouldSetResponder={() => true}
-        onResponderGrant={(event) => at(event.nativeEvent.pageY)}
-        onResponderMove={(event) => at(event.nativeEvent.pageY)}
+        onResponderGrant={at}
+        onResponderMove={at}
       >
         <View style={styles.volumeRail}>
           <View style={[styles.volumeFill, { height: `${value * 100}%` }]} />
@@ -779,6 +814,11 @@ const styles = StyleSheet.create({
     // Prevent the page from scrolling while adjusting volume/brightness.
     // @ts-expect-error web-only CSS
     touchAction: 'none',
+  },
+  dimOverlay: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: '#000',
+    zIndex: 2,
   },
   scrubHud: {
     position: 'absolute',

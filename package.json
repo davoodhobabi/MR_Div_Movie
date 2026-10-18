@@ -1,6 +1,6 @@
 {
   "name": "dmovie",
-  "version": "1.0.41",
+  "version": "1.0.42",
   "main": "expo-router/entry",
   "dependencies": {
     "@expo/metro-runtime": "~57.0.15",
@@ -49,6 +49,9 @@
     "catalog:from-html": "python3 scripts/html-to-catalog.py",
     "debug:apk": "bash scripts/install-debug.sh",
     "host:ffmpeg": "node scripts/ensure-host-ffmpeg.cjs",
+    "deploy": "node scripts/deploy-web-ftp.cjs",
+    "deploy:web": "node scripts/deploy-web-ftp.cjs",
+    "deploy:web:skip-export": "node scripts/deploy-web-ftp.cjs --skip-export",
     "deploy:host": "node scripts/ensure-host-ffmpeg.cjs && node scripts/deploy-host-ftp.cjs"
   },
   "expo": {

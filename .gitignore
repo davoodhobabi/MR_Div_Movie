@@ -11,12 +11,17 @@ web-build/
 host/dist/
 host/vendor/
 host/tmp/
+host/downloads/*.apk
 expo-env.d.ts
 
 # Native
 .kotlin/
 *.orig.*
 *.jks
+*.keystore
+!android/app/debug.keystore
+android/keystore.properties
+android/app/release.keystore
 *.p8
 *.p12
 *.key

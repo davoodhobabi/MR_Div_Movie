@@ -32,9 +32,23 @@ function withAndroidTv(config) {
     const manifest = cfg.modResults.manifest;
     ensureUsesFeature(manifest, 'android.software.leanback', 'false');
     ensureUsesFeature(manifest, 'android.hardware.touchscreen', 'false');
+    // Some TV firmwares refuse packages that require a camera / mic / telephony.
+    ensureUsesFeature(manifest, 'android.hardware.camera', 'false');
+    ensureUsesFeature(manifest, 'android.hardware.camera.autofocus', 'false');
+    ensureUsesFeature(manifest, 'android.hardware.microphone', 'false');
+    ensureUsesFeature(manifest, 'android.hardware.telephony', 'false');
+    ensureUsesFeature(manifest, 'android.hardware.wifi', 'false');
+    ensureUsesFeature(manifest, 'android.hardware.bluetooth', 'false');
+    ensureUsesFeature(manifest, 'android.hardware.location', 'false');
+    ensureUsesFeature(manifest, 'android.hardware.location.gps', 'false');
+    ensureUsesFeature(manifest, 'android.hardware.location.network', 'false');
+    ensureUsesFeature(manifest, 'android.hardware.faketouch', 'false');
+    ensureUsesFeature(manifest, 'android.hardware.screen.portrait', 'false');
 
     const app = AndroidConfig.Manifest.getMainApplicationOrThrow(cfg.modResults);
     app.$['android:banner'] = '@drawable/tv_banner';
+    // Safer default for older Android TV package installers.
+    app.$['android:extractNativeLibs'] = 'true';
 
     const activity = AndroidConfig.Manifest.getMainActivityOrThrow(cfg.modResults);
     activity.$['android:screenOrientation'] = 'fullUser';

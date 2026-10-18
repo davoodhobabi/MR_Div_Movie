@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useState } from 'react';
-import { Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Linking, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFloatingTabBarPadding } from '../../lib/tabBarInset';
 import { BrandLogo } from '../../components/BrandLogo';
@@ -14,6 +14,40 @@ import { GlassScreen } from '../../context/GlassContext';
 import { fetchDonitoGoal, type DonitoGoal } from '../../lib/donito';
 import { useLayout } from '../../lib/layout';
 import { ltrProps, ltrStyle } from '../../lib/rtl';
+
+function DownloadCard({
+  icon,
+  title,
+  hint,
+  url,
+  a11y,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  title: string;
+  hint: string;
+  url: string;
+  a11y: string;
+}) {
+  return (
+    <TvPressable
+      onPress={() => Linking.openURL(url)}
+      style={({ pressed }) => [pressed && styles.pressed]}
+      accessibilityRole="link"
+      accessibilityLabel={a11y}
+    >
+      <Glass {...ltrProps} style={[styles.channelCard, ltrStyle]}>
+        <View style={styles.channelIcon}>
+          <Ionicons name={icon} size={18} color={colors.text} />
+        </View>
+        <View style={styles.channelCopy}>
+          <Text style={styles.channelTitle}>{title}</Text>
+          <Text style={styles.channelHint}>{hint}</Text>
+        </View>
+        <Ionicons name="download-outline" size={16} color={colors.textMuted} />
+      </Glass>
+    </TvPressable>
+  );
+}
 
 export default function SettingsScreen() {
   const { count } = useCatalog();
@@ -68,6 +102,19 @@ export default function SettingsScreen() {
               <Ionicons name="open-outline" size={16} color={colors.textMuted} />
             </Glass>
           </TvPressable>
+
+          {Platform.OS === 'web' ? (
+            <View style={styles.downloadBlock}>
+              <Text style={styles.downloadHeading}>{strings.downloadAppsHeading}</Text>
+              <DownloadCard
+                icon="tv-outline"
+                title={strings.downloadAndroidTvTitle}
+                hint={strings.downloadAndroidTvHint}
+                url={strings.downloadAndroidTvUrl}
+                a11y={strings.downloadAndroidTvA11y}
+              />
+            </View>
+          ) : null}
 
           {goal ? (
             <TvPressable
@@ -176,6 +223,16 @@ const styles = StyleSheet.create({
     fontFamily: fonts.regular,
     textAlign: 'right',
     width: '100%',
+  },
+  downloadBlock: {
+    gap: spacing.sm,
+  },
+  downloadHeading: {
+    color: colors.textMuted,
+    fontSize: 13,
+    fontFamily: fonts.medium,
+    textAlign: 'right',
+    paddingHorizontal: 4,
   },
   goalCard: {
     paddingVertical: 16,
