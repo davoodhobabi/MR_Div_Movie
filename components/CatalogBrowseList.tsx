@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, PixelRatio, Platform, StyleSheet, Text, View } from 'react-native';
 import { strings } from '../constants/strings';
 import { colors, fonts, spacing } from '../constants/theme';
@@ -44,6 +44,18 @@ export function CatalogBrowseList({
     () => (query.trim() ? filterCatalog(items, query) : items),
     [items, query],
   );
+  const pageSize = columns * 6;
+  const [shown, setShown] = useState(pageSize);
+  const paging = useRef(false);
+
+  useEffect(() => {
+    setShown(pageSize);
+    paging.current = false;
+  }, [query, pageSize, items]);
+
+  const data = useMemo(() => visible.slice(0, shown), [visible, shown]);
+  const cardHeight = Math.floor(PixelRatio.roundToNearestPixel(cardWidth * 1.5));
+  const rowStride = cardHeight + gridGap;
 
   const openTitle = (item: IndexedCatalogItem) => {
     router.push({
@@ -71,7 +83,7 @@ export function CatalogBrowseList({
       ) : null}
       <FlatList
         key={`grid-${columns}`}
-        data={visible}
+        data={data}
         keyExtractor={(item) => `${item.imdbId}-${item.index}`}
         numColumns={columns}
         keyboardShouldPersistTaps="handled"
@@ -84,14 +96,30 @@ export function CatalogBrowseList({
           { gap: gridGap, marginBottom: gridGap },
         ]}
         showsVerticalScrollIndicator={false}
-        initialNumToRender={columns * 4}
-        windowSize={5}
-        maxToRenderPerBatch={columns * 4}
-        removeClippedSubviews={!isTv}
+        initialNumToRender={pageSize}
+        maxToRenderPerBatch={pageSize}
+        windowSize={3}
+        updateCellsBatchingPeriod={80}
+        removeClippedSubviews={Platform.OS !== 'web' && !isTv}
+        getItemLayout={(_, index) => ({
+          length: rowStride,
+          offset: rowStride * Math.floor(index / columns),
+          index,
+        })}
+        onEndReachedThreshold={0.8}
+        onEndReached={() => {
+          if (paging.current || shown >= visible.length) return;
+          paging.current = true;
+          setShown((count) => Math.min(visible.length, count + pageSize));
+        }}
+        onContentSizeChange={() => {
+          paging.current = false;
+        }}
         renderItem={({ item }) => (
           <HomeTitleCard
             item={item}
             width={cardWidth}
+            lite
             favorited={isFavorite(item.imdbId)}
             onToggleFavorite={() => toggleFavorite(item.imdbId)}
             onPress={() => openTitle(item)}

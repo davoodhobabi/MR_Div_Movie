@@ -190,7 +190,7 @@ ls -lh "$APK_SRC" "$APK_ANDROID" "$APK_TV" "$APK_WEB"
 
 if command -v adb >/dev/null 2>&1 && adb devices 2>/dev/null | awk 'NR>1 && $2=="device"{found=1} END{exit !found}'; then
   adb devices -l
-  adb install -r "$APK_SRC"
+  adb install -r "$APK_SRC" || echo "adb install failed (signature or device); APK files are still in releases/"
   adb shell monkey -p com.dmovie.app -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 || true
   echo "INSTALLED $APK_ANDROID"
 else

@@ -116,6 +116,11 @@ function patchVideoPlayerKt(filePath) {
   }
 
   if (src.includes('EXTENSION_RENDERER_MODE_ON')) {
+    // Emulator (ranchu) must try MediaCodec first; FFmpeg frames paint as green there.
+    // Real phones and TVs stay on PREFER.
+    if (src.includes('Build.HARDWARE == "ranchu"')) {
+      return false;
+    }
     src = src.replaceAll(
       'EXTENSION_RENDERER_MODE_ON',
       'EXTENSION_RENDERER_MODE_PREFER',

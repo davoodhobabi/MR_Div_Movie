@@ -30,7 +30,11 @@ export function useTvFocus(options: TvFocusOptions = {}) {
     return {
       isTv,
       focused: false,
-      props: {} as const,
+      props: {} as {
+      focusable?: true;
+      onFocus?: () => void;
+      onBlur?: () => void;
+    },
       style: undefined as ViewStyle | undefined,
     };
   }
@@ -51,11 +55,6 @@ export const tvStyles = StyleSheet.create({
   focusRing: {
     borderWidth: 3,
     borderColor: '#E50914',
-    shadowColor: '#E50914',
-    shadowOpacity: 0.55,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 0 },
-    elevation: 8,
   },
   focusSoft: {
     opacity: 1,

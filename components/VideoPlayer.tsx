@@ -28,6 +28,7 @@ import {
   isHtml5UnsupportedMediaUrl,
 } from '../lib/catalog/videoSource';
 import { webMediaHlsMetaUrl, webMediaHlsUrl } from '../lib/catalog/webProxy';
+import { isAndroidTv } from '../lib/tv';
 import { attachWebHls } from '../lib/player/attachWebHls';
 import {
   pickPreferredSubtitle,
@@ -116,6 +117,7 @@ export function VideoPlayer({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
+  const [subtitleLift, setSubtitleLift] = useState(0);
 
   const player = useVideoPlayer(sourceUrl, (instance) => {
     instance.loop = false;
@@ -352,11 +354,16 @@ export function VideoPlayer({
   useEffect(() => {
     if (!fullscreen) return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (isAndroidTv()) {
+        setFullscreen(false);
+        onFullscreenChange?.(false);
+        return true;
+      }
       void viewRef.current?.exitFullscreen();
       return true;
     });
     return () => sub.remove();
-  }, [fullscreen]);
+  }, [fullscreen, onFullscreenChange]);
 
   const selectPreferredSubtitle = (tracks?: SubtitleTrack[]) => {
     if (selectedRef.current) return;
@@ -517,6 +524,12 @@ export function VideoPlayer({
   };
 
   const toggleFullscreen = () => {
+    if (isAndroidTv()) {
+      const next = !fullscreen;
+      setFullscreen(next);
+      onFullscreenChange?.(next);
+      return;
+    }
     if (Platform.OS !== 'web') {
       if (fullscreen) void viewRef.current?.exitFullscreen();
       else void viewRef.current?.enterFullscreen();
@@ -585,11 +598,12 @@ export function VideoPlayer({
         player={player}
         nativeControls={!useCustomControls}
         playsInline
-        fullscreenOptions={{ enable: true, orientation: 'landscape' }}
+        fullscreenOptions={{ enable: !isAndroidTv(), orientation: 'landscape' }}
         allowsPictureInPicture={false}
         contentFit="contain"
         surfaceType="textureView"
         useExoShutter
+        subtitleLift={subtitleLift}
         onFullscreenEnter={() => {
           setFullscreen(true);
           onFullscreenChange?.(true);
@@ -633,6 +647,7 @@ export function VideoPlayer({
           onToggleFullscreen={toggleFullscreen}
           currentTime={clock.currentTime}
           duration={clock.duration}
+          onSubtitleInset={isAndroidTv() ? setSubtitleLift : undefined}
           onSeek={(time) => {
             try {
               player.currentTime = time;
@@ -687,7 +702,8 @@ const styles = StyleSheet.create({
     aspectRatio: 16 / 9,
     backgroundColor: colors.backgroundSoft,
     borderRadius: radii.card,
-    overflow: 'hidden',
+    // On TV, clipping the TextureView detaches its surface and the picture freezes.
+    overflow: isAndroidTv() ? 'visible' : 'hidden',
   },
   wrapperFullscreen: {
     width: '100%',

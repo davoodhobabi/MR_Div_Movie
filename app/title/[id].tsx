@@ -102,7 +102,7 @@ export default function TitleScreen() {
   const [posterFailed, setPosterFailed] = useState(false);
   const resumeStarted = useRef(false);
   const scrollRef = useRef<ScrollView>(null);
-  const { width: windowWidth, height: windowHeight, isTablet, isDesktop, gutter } =
+  const { width: windowWidth, height: windowHeight, isTablet, isDesktop, isTv, gutter } =
     useLayout();
   // Leave room for the back button without crushing the two-line title.
   const navTitleWidth = Math.max(160, windowWidth - 120);
@@ -119,7 +119,9 @@ export default function TitleScreen() {
   );
   const showPoster = Boolean(posterUrl) && !posterFailed;
   const idle = !playback;
-  const wideIdle = idle && (isTablet || isDesktop);
+  const wide = isTablet || isDesktop || isTv;
+  const wideIdle = idle && wide;
+  const playingWide = wide && !idle && !playerFullscreen;
   // Mobile sticky band — 60% of viewport so posters crop less.
   const posterHeight = Math.round(windowHeight * 0.6);
   const POSTER_W_OVER_H = 2 / 3;
@@ -303,7 +305,7 @@ export default function TitleScreen() {
       <View
         style={[
           styles.split,
-          (playback || wideIdle) && (isTablet || isDesktop) && styles.splitWide,
+          (playback || wideIdle) && wide && styles.splitWide,
         ]}
       >
         {playback ? (
@@ -311,7 +313,8 @@ export default function TitleScreen() {
             style={[
               styles.playerDock,
               { paddingHorizontal: playerFullscreen ? 0 : gutter },
-              (isTablet || isDesktop) && styles.playerDockWide,
+              playingWide && styles.playerDockPlaying,
+              !playingWide && wide && !playerFullscreen && styles.playerDockWide,
               playerFullscreen && styles.playerDockFullscreen,
             ]}
           >
@@ -431,7 +434,9 @@ export default function TitleScreen() {
 
         <ScrollView
           ref={scrollRef}
-          style={styles.screen}
+          style={
+            playingWide ? styles.infoPane : styles.screen
+          }
           contentContainerStyle={[
             styles.content,
             wideIdle
@@ -443,6 +448,7 @@ export default function TitleScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
+          {playerFullscreen ? null : (
           <View
             style={[
               styles.sheet,
@@ -564,6 +570,7 @@ export default function TitleScreen() {
               ))
             )}
           </View>
+          )}
         </ScrollView>
       </View>
     </GlassScreen>
@@ -576,6 +583,7 @@ const styles = StyleSheet.create({
   },
   splitWide: {
     flexDirection: 'row',
+    alignItems: 'stretch',
   },
   screen: {
     flex: 1,
@@ -632,8 +640,19 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   playerDockWide: {
-    flex: 1.2,
-    maxWidth: 820,
+    flex: 1,
+    minWidth: 0,
+  },
+  playerDockPlaying: {
+    flex: 1,
+    minWidth: 0,
+    alignSelf: 'stretch',
+  },
+  infoPane: {
+    width: 400,
+    flexGrow: 0,
+    flexShrink: 0,
+    alignSelf: 'stretch',
   },
   playerDockFullscreen: {
     ...StyleSheet.absoluteFill,

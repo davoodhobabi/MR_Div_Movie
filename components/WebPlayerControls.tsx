@@ -1,9 +1,20 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useEffect, useRef, useState, type ComponentProps } from 'react';
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ComponentProps,
+  type Ref,
+} from 'react';
 import {
   Animated,
+  DeviceEventEmitter,
   Easing,
+  findNodeHandle,
+  PixelRatio,
   Platform,
   Pressable,
   StyleSheet,
@@ -14,11 +25,20 @@ import {
 import { strings } from '../constants/strings';
 import { colors, fonts } from '../constants/theme';
 import { placeWebSubtitles } from '../lib/player/webSubtitleTracks';
-import { ltrProps } from '../lib/rtl';
+import { ltrProps, ltrStyle } from '../lib/rtl';
 import { isAndroidTv } from '../lib/tv';
 import { TvPressable } from './TvPressable';
 
 type Menu = 'volume' | 'audio' | 'subs' | 'speed' | null;
+
+const TvControlVisibility = createContext<{
+  onControlFocus: () => void;
+  onControlBlur: () => void;
+  /** Fullscreen transport surface. Up from a control returns here so left/right can seek. */
+  seekTag: number | null;
+} | null>(null);
+
+const TV_SEEK_STEP = 10;
 
 type Props = {
   playing: boolean;
@@ -39,6 +59,8 @@ type Props = {
   currentTime: number;
   duration: number;
   onSeek: (time: number) => void;
+  /** Android TV: pixels to keep clear under the picture while the bar is visible. */
+  onSubtitleInset?: (px: number) => void;
 };
 
 const SPEEDS = [1, 2, 4] as const;
@@ -78,6 +100,7 @@ export function WebPlayerControls({
   currentTime,
   duration,
   onSeek,
+  onSubtitleInset,
 }: Props) {
   const rootRef = useRef<View>(null);
   const dockRef = useRef<View>(null);
@@ -111,16 +134,26 @@ export function WebPlayerControls({
     ]).start();
   };
 
+  const tvFocused = useRef(0);
+
   const armHide = () => {
     if (hideTimer.current) clearTimeout(hideTimer.current);
     if (menuRef.current || seekingRef.current) return;
+    // A focused TV button is not activity. Hide after the remote stays idle.
+    const delay = isAndroidTv() ? 3000 : 1000;
     hideTimer.current = setTimeout(() => {
       if (menuRef.current || seekingRef.current) return;
       shownRef.current = false;
       setShown(false);
       setMenu(null);
       animateTo(false);
-    }, 1000);
+      if (isAndroidTv() && fullscreenRef.current) {
+        setSeekPreferred(false);
+        requestAnimationFrame(() => {
+          if (fullscreenRef.current) setSeekPreferred(true);
+        });
+      }
+    }, delay);
   };
 
   const reveal = () => {
@@ -134,6 +167,31 @@ export function WebPlayerControls({
 
   const revealRef = useRef(reveal);
   revealRef.current = reveal;
+
+  const onControlFocus = () => {
+    tvFocused.current += 1;
+    setControlsFocused(true);
+    if (!shownRef.current) {
+      shownRef.current = true;
+      setShown(true);
+      animateTo(true);
+    }
+    armHide();
+  };
+  const onControlBlur = () => {
+    tvFocused.current = Math.max(0, tvFocused.current - 1);
+    const seen = tvFocused.current;
+    setTimeout(() => {
+      if (tvFocused.current !== seen || seen !== 0) return;
+      setControlsFocused(false);
+      armHide();
+    }, 120);
+  };
+
+  useEffect(() => {
+    if (!isAndroidTv() || !fullscreen) return;
+    revealRef.current();
+  }, [fullscreen]);
 
   useEffect(() => {
     armHide();
@@ -161,6 +219,39 @@ export function WebPlayerControls({
     }
     armHide();
   }, [menu]);
+
+  const onSubtitleInsetRef = useRef(onSubtitleInset);
+  onSubtitleInsetRef.current = onSubtitleInset;
+  const reportSubtitleInset = () => {
+    if (!isAndroidTv() || !onSubtitleInsetRef.current || !shownRef.current) return;
+    const root = rootRef.current;
+    const dock = dockRef.current;
+    if (!root || !dock) return;
+    root.measureInWindow((_x, rootY, _w, rootH) => {
+      dock.measureInWindow((_dx, dockY, _dw, dockH) => {
+        if (!shownRef.current || rootH <= 0 || dockH <= 0) return;
+        // Distance from the top of the control box to the bottom of the picture, plus a gap.
+        const clearanceDp = rootY + rootH - dockY;
+        if (clearanceDp <= 0) return;
+        const px = Math.round((clearanceDp + 20) * PixelRatio.get());
+        onSubtitleInsetRef.current?.(px);
+      });
+    });
+  };
+  useEffect(() => {
+    if (!isAndroidTv() || !onSubtitleInsetRef.current) return;
+    if (!shown) {
+      const timer = setTimeout(() => onSubtitleInsetRef.current?.(0), 480);
+      return () => clearTimeout(timer);
+    }
+    const frame = requestAnimationFrame(reportSubtitleInset);
+    // The bar slides up; measure again once it has settled in this layout.
+    const timer = setTimeout(reportSubtitleInset, 280);
+    return () => {
+      cancelAnimationFrame(frame);
+      clearTimeout(timer);
+    };
+  }, [shown, menu, fullscreen]);
 
   useEffect(() => {
     if (Platform.OS !== 'web') return;
@@ -254,6 +345,7 @@ export function WebPlayerControls({
   const volumeRef = useRef(volume);
   volumeRef.current = volume;
   const [nudge, setNudge] = useState<'back' | 'forward' | null>(null);
+  const [nudgeStep, setNudgeStep] = useState(20);
   const [brightness, setBrightness] = useState(1);
   const brightnessRef = useRef(1);
   const [scrubHud, setScrubHud] = useState<{
@@ -276,17 +368,88 @@ export function WebPlayerControls({
     };
   }, [brightness]);
 
-  const jump = (dir: 'back' | 'forward') => {
-    const delta = dir === 'back' ? -20 : 20;
-    const cap = Number.isFinite(duration) && duration > 0 ? duration : anchorRef.current + 20;
+  const jump = (dir: 'back' | 'forward', step = 20) => {
+    const delta = dir === 'back' ? -step : step;
+    const cap = Number.isFinite(duration) && duration > 0 ? duration : anchorRef.current + step;
     const next = Math.min(cap, Math.max(0, anchorRef.current + delta));
     anchorRef.current = next;
     onSeek(next);
     setNudge(dir);
+    setNudgeStep(step);
     if (nudgeTimer.current) clearTimeout(nudgeTimer.current);
     nudgeTimer.current = setTimeout(() => setNudge(null), 650);
     reveal();
   };
+  const jumpRef = useRef(jump);
+  jumpRef.current = jump;
+
+  const catcherRef = useRef<View>(null);
+  const playRef = useRef<View>(null);
+  const catcherFocused = useRef(false);
+  const [seekTag, setSeekTag] = useState<number | null>(null);
+  const [playTag, setPlayTag] = useState<number | null>(null);
+  const [seekPreferred, setSeekPreferred] = useState(false);
+  const [barPreferred, setBarPreferred] = useState(false);
+  const [controlsFocused, setControlsFocused] = useState(false);
+  const fullscreenRef = useRef(fullscreen);
+  fullscreenRef.current = fullscreen;
+
+  const syncSeekTags = () => {
+    const seek = catcherRef.current ? findNodeHandle(catcherRef.current) : null;
+    const play = playRef.current ? findNodeHandle(playRef.current) : null;
+    setSeekTag((prev) => (prev === seek ? prev : seek));
+    setPlayTag((prev) => (prev === play ? prev : play));
+  };
+
+  const wasFullscreen = useRef(false);
+  useEffect(() => {
+    if (!tvMode) return;
+    if (fullscreen) {
+      wasFullscreen.current = true;
+      setBarPreferred(false);
+      setSeekPreferred(false);
+      const frame = requestAnimationFrame(() => setSeekPreferred(true));
+      return () => cancelAnimationFrame(frame);
+    }
+    setSeekPreferred(false);
+    if (!wasFullscreen.current) return;
+    wasFullscreen.current = false;
+    setBarPreferred(false);
+    const frame = requestAnimationFrame(() => setBarPreferred(true));
+    return () => cancelAnimationFrame(frame);
+  }, [fullscreen, tvMode]);
+
+  useEffect(() => {
+    if (!tvMode) return;
+    let lastAt = 0;
+    const sub = DeviceEventEmitter.addListener(
+      'onHWKeyEvent',
+      (event: { eventType?: string; eventKeyAction?: number }) => {
+        if (event.eventKeyAction !== 0) return;
+        revealRef.current();
+        // Buttons own left/right while one of them is focused. Otherwise the video surface seeks.
+        if (!fullscreen || tvFocused.current > 0 || menuRef.current) return;
+        const now = Date.now();
+        if (event.eventType === 'select') {
+          if (now - lastAt < 400) return;
+          lastAt = now;
+          revealRef.current();
+          onTogglePlay();
+          return;
+        }
+        const dir =
+          event.eventType === 'left' || event.eventType === 'rewind'
+            ? 'back'
+            : event.eventType === 'right' || event.eventType === 'fastForward'
+              ? 'forward'
+              : null;
+        if (!dir || now - lastAt < 250) return;
+        lastAt = now;
+        jumpRef.current(dir, TV_SEEK_STEP);
+      },
+    );
+    return () => sub.remove();
+  }, [fullscreen, onTogglePlay, tvMode]);
 
   const pointFromEvent = (event: GestureResponderEvent) => {
     const node = rootRef.current as unknown as HTMLElement | null;
@@ -402,9 +565,47 @@ export function WebPlayerControls({
       : 'volume-high';
 
   return (
+    <TvControlVisibility.Provider value={{ onControlFocus, onControlBlur, seekTag: tvMode && fullscreen ? seekTag : null }}>
     <View ref={rootRef} style={styles.root} pointerEvents="box-none">
       <View
+        ref={catcherRef}
         style={styles.catcher}
+        focusable={Boolean(tvMode && (fullscreen || !controlsFocused))}
+        hasTVPreferredFocus={Boolean(tvMode && fullscreen && seekPreferred)}
+        onLayout={tvMode ? syncSeekTags : undefined}
+        onFocus={
+          tvMode
+            ? () => {
+                catcherFocused.current = true;
+                if (fullscreenRef.current) return;
+                revealRef.current();
+                setBarPreferred(false);
+                requestAnimationFrame(() => setBarPreferred(true));
+              }
+            : undefined
+        }
+        onBlur={
+          tvMode
+            ? () => {
+                catcherFocused.current = false;
+              }
+            : undefined
+        }
+        {...(tvMode
+          ? ({
+              // Fullscreen keeps left/right on the video for seeking.
+              // Minimized clears that trap so the D-pad can reach the buttons.
+              nextFocusLeft: fullscreen && seekTag != null ? seekTag : -1,
+              nextFocusRight: fullscreen && seekTag != null ? seekTag : -1,
+              nextFocusUp: fullscreen && seekTag != null ? seekTag : -1,
+              nextFocusDown: playTag ?? -1,
+            } as {
+              nextFocusLeft?: number;
+              nextFocusRight?: number;
+              nextFocusUp?: number;
+              nextFocusDown?: number;
+            })
+          : null)}
         onStartShouldSetResponder={() => true}
         onMoveShouldSetResponder={() => !tvMode}
         onResponderTerminationRequest={() => false}
@@ -424,10 +625,21 @@ export function WebPlayerControls({
       {nudge ? (
         <View
           pointerEvents="none"
-          style={[styles.nudge, nudge === 'back' ? styles.nudgeLeft : styles.nudgeRight]}
+          style={[
+            styles.nudge,
+            // RTL maps `left` onto the physical right. On TV the timeline is left-to-right,
+            // so the back cue sits on the physical left and forward on the physical right.
+            nudge === 'back'
+              ? tvMode
+                ? styles.nudgeRight
+                : styles.nudgeLeft
+              : tvMode
+                ? styles.nudgeLeft
+                : styles.nudgeRight,
+          ]}
         >
           <Text style={styles.nudgeText}>
-            {nudge === 'back' ? `−${faNum(20)}` : `+${faNum(20)}`}
+            {nudge === 'back' ? `−${faNum(nudgeStep)}` : `+${faNum(nudgeStep)}`}
           </Text>
         </View>
       ) : null}
@@ -455,7 +667,7 @@ export function WebPlayerControls({
         </View>
       ) : null}
       <Animated.View
-        pointerEvents={shown ? 'box-none' : 'none'}
+        pointerEvents={shown || tvMode ? 'box-none' : 'none'}
         style={[styles.fade, { opacity, transform: [{ translateY: shift }] }]}
       >
         {!playing ? (
@@ -486,7 +698,11 @@ export function WebPlayerControls({
           style={[styles.shade, compact && styles.shadeCompact]}
           pointerEvents="box-none"
         >
-          <View ref={dockRef} pointerEvents="box-none">
+          <View
+            ref={dockRef}
+            pointerEvents="box-none"
+            onLayout={isAndroidTv() ? reportSubtitleInset : undefined}
+          >
           {menu === 'audio' || menu === 'subs' || menu === 'speed' ? (
             <View style={styles.sheet}>
               {menu === 'speed' ? (
@@ -572,13 +788,16 @@ export function WebPlayerControls({
 
           <View style={styles.row}>
             <IconButton
+              hostRef={playRef}
               icon={playing ? 'pause' : 'play'}
               label={playing ? strings.playerPauseLabel : strings.playerPlayLabel}
               large
               compact={compact}
+              preferFocus={barPreferred}
               onPress={onTogglePlay}
+              onLayout={tvMode ? syncSeekTags : undefined}
             />
-            <Text style={[styles.time, compact && styles.timeCompact]}>
+            <Text style={[styles.time, compact && styles.timeCompact, tvMode && ltrStyle]}>
               {formatClock(currentTime)}
               <Text style={styles.timeDim}> / {formatClock(duration)}</Text>
             </Text>
@@ -648,35 +867,65 @@ export function WebPlayerControls({
         </LinearGradient>
       </Animated.View>
     </View>
+    </TvControlVisibility.Provider>
   );
 }
 
-function ControlPressable(props: ComponentProps<typeof Pressable>) {
-  if (isAndroidTv()) {
-    return <TvPressable {...props} />;
-  }
-  return <Pressable {...props} />;
+function ControlPressable({
+  hostRef,
+  ...props
+}: ComponentProps<typeof Pressable> & { hostRef?: Ref<View> }) {
+  const tv = useContext(TvControlVisibility);
+  const up =
+    tv?.seekTag != null
+      ? ({ nextFocusUp: tv.seekTag } as { nextFocusUp?: number })
+      : null;
+  if (!isAndroidTv() || !tv) return <Pressable ref={hostRef} {...props} />;
+  return (
+    <TvPressable
+      hostRef={hostRef}
+      {...props}
+      {...up}
+      onFocus={(event) => {
+        props.onFocus?.(event);
+        tv.onControlFocus();
+      }}
+      onBlur={(event) => {
+        props.onBlur?.(event);
+        tv.onControlBlur();
+      }}
+    />
+  );
 }
 
 function IconButton({
+  hostRef,
   icon,
   label,
   onPress,
+  onLayout,
   active,
   large,
   compact,
+  preferFocus,
 }: {
+  hostRef?: Ref<View>;
   icon: keyof typeof Ionicons.glyphMap;
   label: string;
   onPress: () => void;
+  onLayout?: () => void;
   active?: boolean;
   large?: boolean;
   compact?: boolean;
+  preferFocus?: boolean;
 }) {
   const size = compact ? (large ? 18 : 15) : large ? 26 : 22;
   return (
     <ControlPressable
+      hostRef={hostRef}
       onPress={onPress}
+      onLayout={onLayout}
+      hasTVPreferredFocus={preferFocus}
       accessibilityRole="button"
       accessibilityLabel={label}
       hitSlop={compact ? 4 : 6}
@@ -742,7 +991,7 @@ function SeekBar({
   return (
     <View
       {...ltrProps}
-      style={[styles.seek, compact && styles.seekCompact]}
+      style={[styles.seek, compact && styles.seekCompact, isAndroidTv() && ltrStyle]}
       onLayout={(event) => {
         widthRef.current = Math.max(1, event.nativeEvent.layout.width);
       }}

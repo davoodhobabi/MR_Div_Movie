@@ -3,10 +3,12 @@ import { Tabs } from 'expo-router';
 import { AppTabBar } from '../../components/AppTabBar';
 import { strings } from '../../constants/strings';
 import { TabBarBlurTargetProvider } from '../../context/GlassContext';
+import { TvMenuFocusProvider } from '../../context/TvMenuFocus';
 
 export default function TabsLayout() {
   return (
     <TabBarBlurTargetProvider>
+      <TvMenuFocusProvider>
       <Tabs
         initialRouteName="index"
         tabBar={(props) => <AppTabBar {...props} />}
@@ -81,6 +83,7 @@ export default function TabsLayout() {
           }}
         />
       </Tabs>
+      </TvMenuFocusProvider>
     </TabBarBlurTargetProvider>
   );
 }

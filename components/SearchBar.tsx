@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useState } from 'react';
+import { useIsFocused } from 'expo-router';
+import { useEffect, useRef, useState } from 'react';
 import {
   Pressable,
   StyleSheet,
@@ -9,8 +10,9 @@ import {
 } from 'react-native';
 import { strings } from '../constants/strings';
 import { colors, fonts, radii, spacing } from '../constants/theme';
+import { useTvMenuFocus } from '../context/TvMenuFocus';
 import { Glass } from './Glass';
-import { useTvFocus } from '../lib/tv';
+import { isAndroidTv, useTvFocus } from '../lib/tv';
 
 type SearchBarProps = {
   onSubmit: (query: string) => void;
@@ -28,6 +30,20 @@ export function SearchBar({
   const [value, setValue] = useState(initialValue);
   const [focused, setFocused] = useState(false);
   const clearFocus = useTvFocus();
+  const inputRef = useRef<TextInput>(null);
+  const screenFocused = useIsFocused();
+  const menu = useTvMenuFocus();
+  const registerEntry = menu?.registerEntry;
+  const tv = isAndroidTv();
+
+  useEffect(() => {
+    if (!tv || !screenFocused || !registerEntry) return;
+    const frame = requestAnimationFrame(() => registerEntry(inputRef.current));
+    return () => {
+      cancelAnimationFrame(frame);
+      registerEntry(null);
+    };
+  }, [tv, screenFocused, registerEntry]);
 
   const updateValue = (next: string) => {
     setValue(next);
@@ -49,8 +65,14 @@ export function SearchBar({
         <Ionicons name="search" size={20} color={colors.accent} />
       </View>
       <TextInput
+        ref={inputRef}
         value={value}
         onChangeText={updateValue}
+        {...(tv
+          ? ({ nextFocusUp: menu?.menuTag ?? undefined } as {
+              nextFocusUp?: number;
+            })
+          : null)}
         onSubmitEditing={handleSubmit}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}

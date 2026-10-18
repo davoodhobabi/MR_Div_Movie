@@ -1,6 +1,6 @@
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
-import { useContext, useState } from 'react';
+import { useContext, useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg';
 import { strings } from '../constants/strings';
@@ -8,6 +8,7 @@ import { colors, fonts, radii, spacing } from '../constants/theme';
 import { TabBarBlurTargetContext } from '../context/GlassContext';
 import { useLayout } from '../lib/layout';
 import { ltrProps, ltrStyle } from '../lib/rtl';
+import { useTvMenuFocus } from '../context/TvMenuFocus';
 import { useIsTv, useTvFocus } from '../lib/tv';
 
 type TabRoute = { key: string; name: string };
@@ -137,7 +138,7 @@ export function AppTabBar({ state, navigation, insets }: TabBarProps) {
               <TabItem
                 key={route.key}
                 glowId={`tabGlow-${route.key}`}
-                focused={focused}
+                selected={focused}
                 label={meta.label}
                 icon={focused ? meta.iconOn : meta.icon}
                 onPress={onPress}
@@ -152,29 +153,64 @@ export function AppTabBar({ state, navigation, insets }: TabBarProps) {
 
 function TabItem({
   glowId,
-  focused,
+  selected,
   label,
   icon,
   onPress,
 }: {
   glowId: string;
-  focused: boolean;
+  selected: boolean;
   label: string;
   icon: keyof typeof Ionicons.glyphMap;
   onPress: () => void;
 }) {
   const [size, setSize] = useState({ width: 0, height: 0 });
   const tvFocus = useTvFocus();
+  const menu = useTvMenuFocus();
+  const hostRef = useRef<View>(null);
+  const [preferFocus, setPreferFocus] = useState(false);
+  const isTv = useIsTv();
+
+  useEffect(() => {
+    if (!isTv || !selected) return;
+    menu?.registerMenu(hostRef.current);
+  }, [isTv, selected, menu, size.width]);
+
+  useEffect(() => {
+    if (!isTv || !selected || !menu?.focusPulse) return;
+    setPreferFocus(false);
+    const frame = requestAnimationFrame(() => setPreferFocus(true));
+    return () => cancelAnimationFrame(frame);
+  }, [isTv, selected, menu?.focusPulse]);
 
   return (
     <Pressable
+      ref={hostRef}
       onPress={onPress}
       {...tvFocus.props}
+      hasTVPreferredFocus={isTv && selected && preferFocus}
+      {...(isTv
+        ? ({ nextFocusDown: menu?.entryTag ?? undefined } as {
+            nextFocusDown?: number;
+          })
+        : null)}
+      onFocus={(event) => {
+        tvFocus.props.onFocus?.();
+        menu?.onMenuFocus();
+        if (selected) menu?.registerMenu(hostRef.current);
+        void event;
+      }}
+      onBlur={(event) => {
+        tvFocus.props.onBlur?.();
+        menu?.onMenuBlur();
+        void event;
+      }}
       onLayout={(event) => {
         const { width, height } = event.nativeEvent.layout;
         if (width !== size.width || height !== size.height) {
           setSize({ width, height });
         }
+        if (isTv && selected) menu?.registerMenu(hostRef.current);
       }}
       style={({ pressed }) => [
         styles.item,
@@ -182,21 +218,21 @@ function TabItem({
         tvFocus.style,
       ]}
       accessibilityRole="button"
-      accessibilityState={{ selected: focused }}
+      accessibilityState={{ selected }}
       accessibilityLabel={label}
     >
-      {focused ? (
+      {selected ? (
         <BottomGlow id={glowId} width={size.width} height={size.height} />
       ) : null}
       <View style={styles.iconSlot}>
         <Ionicons
           name={icon}
           size={22}
-          color={focused ? colors.text : colors.textDim}
+          color={selected ? colors.text : colors.textDim}
         />
       </View>
       <Text
-        style={[styles.label, focused && styles.labelOn]}
+        style={[styles.label, selected && styles.labelOn]}
         numberOfLines={1}
         adjustsFontSizeToFit
         minimumFontScale={0.8}

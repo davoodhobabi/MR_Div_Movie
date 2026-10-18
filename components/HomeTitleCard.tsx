@@ -1,7 +1,7 @@
 import { BlurTargetView, BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useRef, useState } from 'react';
-import { Image, PixelRatio, Pressable, StyleSheet, Text, View } from 'react-native';
+import { PixelRatio, Pressable, StyleSheet, Text, View } from 'react-native';
 import { strings } from '../constants/strings';
 import { colors, fonts, radii } from '../constants/theme';
 import { usePosterUrl } from '../lib/catalog/poster';
@@ -9,6 +9,7 @@ import { catalogScores } from '../lib/catalog/rating';
 import { isSeriesItem, type CatalogItem } from '../lib/catalog/types';
 import { ltrProps, ltrStyle } from '../lib/rtl';
 import { useIsTv, useTvFocus } from '../lib/tv';
+import { PosterImage } from './PosterImage';
 
 const POSTER_WIDTH = 140;
 const POSTER_ASPECT = 3 / 2;
@@ -24,6 +25,8 @@ type HomeTitleCardProps = {
   favorited?: boolean;
   onToggleFavorite?: () => void;
   onRemoveWatching?: () => void;
+  /** Grid cells skip the second poster decode and live blur. */
+  lite?: boolean;
 };
 
 export function HomeTitleCard({
@@ -36,6 +39,7 @@ export function HomeTitleCard({
   favorited = false,
   onToggleFavorite,
   onRemoveWatching,
+  lite = false,
 }: HomeTitleCardProps) {
   const posterUrl = usePosterUrl(item);
   const posterTargetRef = useRef<View | null>(null);
@@ -75,6 +79,14 @@ export function HomeTitleCard({
     setPosterAttempt(0);
   }, [item.imdbId, posterUrl]);
 
+  const retryPoster = () => {
+    if (posterAttempt < 2) {
+      setPosterAttempt((n) => n + 1);
+      return;
+    }
+    setPosterFailed(true);
+  };
+
   const mark = watching ? (
     <Pressable
       onPress={onRemoveWatching}
@@ -109,33 +121,33 @@ export function HomeTitleCard({
     <Pressable
       onPress={onPress}
       {...tvFocus.props}
-      style={({ pressed }) => [styles.frame, styles.fill, pressed && styles.pressed, tvFocus.style]}
+      style={({ pressed }) => [styles.frame, styles.fill, pressed && styles.pressed]}
       accessibilityRole="button"
     >
         <BlurTargetView ref={posterTargetRef} collapsable={false} style={styles.fill}>
           {showPoster ? (
-            <>
-              <Image
-                source={{ uri: posterSourceUri as string }}
+            lite ? (
+              <PosterImage
+                uri={posterSourceUri as string}
                 style={styles.fill}
                 resizeMode="cover"
-                blurRadius={18}
-                fadeDuration={0}
+                onError={retryPoster}
               />
-              <Image
-                source={{ uri: posterSourceUri as string }}
-                style={styles.fill}
-                resizeMode="contain"
-                fadeDuration={0}
-                onError={() => {
-                  if (posterAttempt < 2) {
-                    setPosterAttempt((n) => n + 1);
-                    return;
-                  }
-                  setPosterFailed(true);
-                }}
-              />
-            </>
+            ) : (
+              <>
+                <PosterImage
+                  uri={posterSourceUri as string}
+                  style={styles.fill}
+                  resizeMode="cover"
+                />
+                <PosterImage
+                  uri={posterSourceUri as string}
+                  style={styles.fill}
+                  resizeMode="contain"
+                  onError={retryPoster}
+                />
+              </>
+            )
           ) : (
             <View style={[styles.fill, styles.placeholder]}>
               <Ionicons
@@ -150,18 +162,67 @@ export function HomeTitleCard({
         <View style={styles.overlay} pointerEvents="box-none">
           <View style={styles.badges} pointerEvents="box-none">
             <View style={styles.markSpacer} />
-            <BlurView
-              blurTarget={posterTargetRef}
-              intensity={40}
-              tint="dark"
-              blurMethod="dimezisBlurView"
-              style={styles.kindChip}
-            >
-              <Text style={styles.kindText}>{kind}</Text>
-            </BlurView>
+            {lite ? (
+              <View style={[styles.kindChip, styles.kindChipLite]}>
+                <Text style={styles.kindText}>{kind}</Text>
+              </View>
+            ) : (
+              <BlurView
+                blurTarget={posterTargetRef}
+                intensity={40}
+                tint="dark"
+                blurMethod="dimezisBlurView"
+                style={styles.kindChip}
+              >
+                <Text style={styles.kindText}>{kind}</Text>
+              </BlurView>
+            )}
           </View>
 
           <View style={styles.copyWrap}>
+            {lite ? (
+              <View style={[styles.copyBlur, styles.copyLite]}>
+              <View {...ltrProps} style={[styles.copyInner, ltrStyle]}>
+                {persian ? (
+                  <Text style={styles.titleFa} numberOfLines={2}>
+                    {persian}
+                  </Text>
+                ) : null}
+                <Text
+                  style={[styles.titleEn, !persian && styles.titleEnSolo]}
+                  numberOfLines={persian ? 1 : 2}
+                >
+                  {item.title}
+                </Text>
+                <View {...ltrProps} style={[styles.meta, ltrStyle]}>
+                  {rating ? (
+                    <View style={styles.rating}>
+                      <Ionicons name="star" size={11} color={colors.gold} />
+                      <Text style={styles.ratingText}>{rating}</Text>
+                    </View>
+                  ) : null}
+                  {year ? <Text style={styles.metaText}>{year}</Text> : null}
+                </View>
+                {watching && subtitle ? (
+                  <Text style={styles.subtitle} numberOfLines={1}>
+                    {subtitle}
+                  </Text>
+                ) : null}
+                {watching ? (
+                  <View style={styles.progressTrack}>
+                    <View
+                      style={[
+                        styles.progressFill,
+                        {
+                          width: `${Math.max(6, Math.min(100, percent ?? 0))}%`,
+                        },
+                      ]}
+                    />
+                  </View>
+                ) : null}
+              </View>
+              </View>
+            ) : (
             <BlurView
               blurTarget={posterTargetRef}
               intensity={50}
@@ -209,9 +270,13 @@ export function HomeTitleCard({
                 ) : null}
               </View>
             </BlurView>
+            )}
           </View>
         </View>
     </Pressable>
+    {tvFocus.focused ? (
+      <View pointerEvents="none" style={styles.tvFocusRing} />
+    ) : null}
     {mark}
     </View>
   );
@@ -225,6 +290,17 @@ const styles = StyleSheet.create({
     borderRadius: POSTER_RADIUS,
     overflow: 'hidden',
     backgroundColor: colors.backgroundSoft,
+  },
+  tvFocusRing: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    zIndex: 3,
+    borderWidth: 3,
+    borderColor: '#E50914',
+    borderRadius: POSTER_RADIUS,
   },
   fill: {
     position: 'absolute',
@@ -280,6 +356,12 @@ const styles = StyleSheet.create({
     borderRadius: radii.chip,
     paddingHorizontal: 8,
     paddingVertical: 3,
+  },
+  kindChipLite: {
+    backgroundColor: 'rgba(7, 8, 12, 0.72)',
+  },
+  copyLite: {
+    backgroundColor: 'rgba(7, 8, 12, 0.78)',
   },
   kindText: {
     color: colors.text,
