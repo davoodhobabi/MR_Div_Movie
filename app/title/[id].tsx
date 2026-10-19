@@ -657,7 +657,7 @@ const styles = StyleSheet.create({
   playerDockFullscreen: {
     ...StyleSheet.absoluteFill,
     zIndex: 50,
-    elevation: 50,
+    elevation: 8,
     padding: 0,
     backgroundColor: '#000',
   },

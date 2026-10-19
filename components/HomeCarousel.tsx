@@ -4,6 +4,7 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { strings } from '../constants/strings';
 import { colors, fonts, radii, spacing } from '../constants/theme';
 import { useLayout } from '../lib/layout';
+import { useIsTv } from '../lib/tv';
 import { Glass } from './Glass';
 import { TvPressable } from './TvPressable';
 
@@ -29,6 +30,7 @@ export function HomeCarousel({
   emptyHint,
 }: HomeCarouselProps) {
   const { gutter, gridGap } = useLayout();
+  const isTv = useIsTv();
   return (
     <View style={styles.section}>
       <View style={[styles.header, { paddingHorizontal: gutter }]}>
@@ -62,6 +64,7 @@ export function HomeCarousel({
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
+          removeClippedSubviews={isTv}
           contentContainerStyle={[styles.track, { paddingHorizontal: gutter, gap: gridGap }]}
           style={styles.scroller}
         >

@@ -106,47 +106,82 @@ export function AppTabBar({ state, navigation, insets }: TabBarProps) {
         },
       ]}
     >
-      <BlurView
-        key={tabBarBlur?.target ? 'blur-ready' : 'blur-wait'}
-        pointerEvents="box-none"
-        intensity={80}
-        tint="dark"
-        blurMethod="dimezisBlurView"
-        blurReductionFactor={2}
-        blurTarget={tabBarBlur?.target ?? undefined}
-        style={[styles.bar, (isTablet || isTv) && styles.barWide]}
-      >
-        <View pointerEvents="none" style={styles.tint} />
-        <View {...ltrProps} style={[styles.row, ltrStyle]}>
-          {state.routes.map((route, index) => {
-            const meta = TAB_META[route.name];
-            if (!meta) return null;
-            const focused = state.index === index;
-
-            const onPress = () => {
-              const event = navigation.emit({
-                type: 'tabPress',
-                target: route.key,
-                canPreventDefault: true,
-              });
-              if (!focused && !event.defaultPrevented) {
-                navigation.navigate(route.name);
-              }
-            };
-
-            return (
-              <TabItem
-                key={route.key}
-                glowId={`tabGlow-${route.key}`}
-                selected={focused}
-                label={meta.label}
-                icon={focused ? meta.iconOn : meta.icon}
-                onPress={onPress}
-              />
-            );
-          })}
+      {isTv ? (
+        <View
+          pointerEvents="box-none"
+          style={[styles.bar, styles.barTv, styles.barWide]}
+        >
+          <View {...ltrProps} style={[styles.row, ltrStyle]}>
+            {state.routes.map((route, index) => {
+              const meta = TAB_META[route.name];
+              if (!meta) return null;
+              const focused = state.index === index;
+              const onPress = () => {
+                const event = navigation.emit({
+                  type: 'tabPress',
+                  target: route.key,
+                  canPreventDefault: true,
+                });
+                if (!focused && !event.defaultPrevented) {
+                  navigation.navigate(route.name);
+                }
+              };
+              return (
+                <TabItem
+                  key={route.key}
+                  glowId={`tabGlow-${route.key}`}
+                  selected={focused}
+                  label={meta.label}
+                  icon={focused ? meta.iconOn : meta.icon}
+                  onPress={onPress}
+                />
+              );
+            })}
+          </View>
         </View>
-      </BlurView>
+      ) : (
+        <BlurView
+          key={tabBarBlur?.target ? 'blur-ready' : 'blur-wait'}
+          pointerEvents="box-none"
+          intensity={80}
+          tint="dark"
+          blurMethod="dimezisBlurView"
+          blurReductionFactor={2}
+          blurTarget={tabBarBlur?.target ?? undefined}
+          style={[styles.bar, isTablet && styles.barWide]}
+        >
+          <View pointerEvents="none" style={styles.tint} />
+          <View {...ltrProps} style={[styles.row, ltrStyle]}>
+            {state.routes.map((route, index) => {
+              const meta = TAB_META[route.name];
+              if (!meta) return null;
+              const focused = state.index === index;
+
+              const onPress = () => {
+                const event = navigation.emit({
+                  type: 'tabPress',
+                  target: route.key,
+                  canPreventDefault: true,
+                });
+                if (!focused && !event.defaultPrevented) {
+                  navigation.navigate(route.name);
+                }
+              };
+
+              return (
+                <TabItem
+                  key={route.key}
+                  glowId={`tabGlow-${route.key}`}
+                  selected={focused}
+                  label={meta.label}
+                  icon={focused ? meta.iconOn : meta.icon}
+                  onPress={onPress}
+                />
+              );
+            })}
+          </View>
+        </BlurView>
+      )}
     </View>
   );
 }
@@ -221,7 +256,7 @@ function TabItem({
       accessibilityState={{ selected }}
       accessibilityLabel={label}
     >
-      {selected ? (
+      {selected && !isTv ? (
         <BottomGlow id={glowId} width={size.width} height={size.height} />
       ) : null}
       <View style={styles.iconSlot}>
@@ -261,6 +296,11 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 680,
     alignSelf: 'center',
+  },
+  barTv: {
+    backgroundColor: 'rgba(14, 16, 22, 0.96)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.14)',
   },
   tint: {
     ...StyleSheet.absoluteFill,

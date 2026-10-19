@@ -2,7 +2,7 @@
   "expo": {
     "name": "MrDiv_Movie",
     "slug": "DMovie",
-    "version": "1.0.43",
+    "version": "1.0.44",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "dmovie",
@@ -27,7 +27,7 @@
     },
     "android": {
       "package": "com.dmovie.app",
-      "versionCode": 10043,
+      "versionCode": 10044,
       "adaptiveIcon": {
         "backgroundColor": "#000000",
         "foregroundImage": "./assets/android-icon-foreground.png",

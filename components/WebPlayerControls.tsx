@@ -59,6 +59,8 @@ type Props = {
   currentTime: number;
   duration: number;
   onSeek: (time: number) => void;
+  /** Relative seek from the player's real position (preferred on Android TV). */
+  onSeekBy?: (deltaSeconds: number) => void;
   /** Android TV: pixels to keep clear under the picture while the bar is visible. */
   onSubtitleInset?: (px: number) => void;
 };
@@ -100,6 +102,7 @@ export function WebPlayerControls({
   currentTime,
   duration,
   onSeek,
+  onSeekBy,
   onSubtitleInset,
 }: Props) {
   const rootRef = useRef<View>(null);
@@ -330,7 +333,8 @@ export function WebPlayerControls({
     onTogglePlay();
   };
 
-  const anchorRef = useRef(currentTime);
+  const currentTimeRef = useRef(currentTime);
+  const jumpLockUntil = useRef(0);
   const tapRef = useRef({ at: 0, zone: 'center' as 'left' | 'center' | 'right' });
   const singleTapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const nudgeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -353,8 +357,10 @@ export function WebPlayerControls({
     value: number;
   } | null>(null);
 
-  if (Math.abs(currentTime - anchorRef.current) < 1.5) {
-    anchorRef.current = currentTime;
+  // Keep a live clock for stacked seeks, but do not overwrite it while a jump is in flight.
+  // The old |Δ|<1.5 gate broke when the clock updated slower than every 1.5s (TV).
+  if (Date.now() >= jumpLockUntil.current) {
+    currentTimeRef.current = currentTime;
   }
 
   useEffect(() => {
@@ -370,10 +376,16 @@ export function WebPlayerControls({
 
   const jump = (dir: 'back' | 'forward', step = 20) => {
     const delta = dir === 'back' ? -step : step;
-    const cap = Number.isFinite(duration) && duration > 0 ? duration : anchorRef.current + step;
-    const next = Math.min(cap, Math.max(0, anchorRef.current + delta));
-    anchorRef.current = next;
-    onSeek(next);
+    const base = currentTimeRef.current;
+    const cap = Number.isFinite(duration) && duration > 0 ? duration : Math.max(base + step, step);
+    const next = Math.min(cap, Math.max(0, base + delta));
+    const applied = next - base;
+    if (applied === 0) return;
+    currentTimeRef.current = next;
+    jumpLockUntil.current = Date.now() + 900;
+    // Native seekBy uses ExoPlayer's real position — avoids stale React clock jumps to 0.
+    if (onSeekBy) onSeekBy(applied);
+    else onSeek(next);
     setNudge(dir);
     setNudgeStep(step);
     if (nudgeTimer.current) clearTimeout(nudgeTimer.current);
@@ -692,16 +704,26 @@ export function WebPlayerControls({
           </View>
         ) : null}
 
-        <LinearGradient
-          colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.45)', 'rgba(0,0,0,0.82)']}
-          locations={[0, 0.42, 1]}
-          style={[styles.shade, compact && styles.shadeCompact]}
+        <View
+          style={[
+            styles.shade,
+            tvMode ? styles.shadeTv : styles.shadePhone,
+            compact && styles.shadeCompact,
+          ]}
           pointerEvents="box-none"
         >
+          {!tvMode ? (
+            <LinearGradient
+              colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.45)', 'rgba(0,0,0,0.82)']}
+              locations={[0, 0.42, 1]}
+              style={StyleSheet.absoluteFill}
+              pointerEvents="none"
+            />
+          ) : null}
           <View
             ref={dockRef}
             pointerEvents="box-none"
-            onLayout={isAndroidTv() ? reportSubtitleInset : undefined}
+            onLayout={tvMode ? reportSubtitleInset : undefined}
           >
           {menu === 'audio' || menu === 'subs' || menu === 'speed' ? (
             <View style={styles.sheet}>
@@ -864,7 +886,7 @@ export function WebPlayerControls({
           </View>
           </View>
           </View>
-        </LinearGradient>
+        </View>
       </Animated.View>
     </View>
     </TvControlVisibility.Provider>
@@ -1155,6 +1177,13 @@ const styles = StyleSheet.create({
     paddingTop: 48,
     paddingBottom: 10,
     paddingHorizontal: 10,
+  },
+  shadePhone: {
+    backgroundColor: 'transparent',
+  },
+  shadeTv: {
+    // Solid wash instead of a live gradient over TextureView.
+    backgroundColor: 'rgba(0,0,0,0.55)',
   },
   shadeCompact: {
     paddingTop: 22,

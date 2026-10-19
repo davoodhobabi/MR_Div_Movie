@@ -292,45 +292,42 @@ export function VideoPlayer({
 
   useEffect(() => {
     if (!useCustomControls) return;
+    try {
+      // TV remotes don't need sub-second seek-bar ticks; slower updates cut JS work.
+      player.timeUpdateEventInterval = isAndroidTv() ? 1 : 0.5;
+    } catch {
+      // Older builds may ignore the interval.
+    }
+  }, [player]);
+
+  // Web VTT tracks are not exposed through the same events; poll lightly.
+  useEffect(() => {
+    if (!useCustomControls || Platform.OS !== 'web') return;
     const timer = setInterval(() => {
       try {
-        setClock({
-          currentTime: player.currentTime || 0,
-          duration: Number.isFinite(player.duration) ? player.duration : 0,
-        });
-        if (Platform.OS === 'web') {
-          const node = boxRef.current as unknown as {
-            querySelector?: (selector: string) => HTMLVideoElement | null;
-          };
-          const video = node?.querySelector?.('video');
-          if (!video) return;
-          const snapshot = readWebSubtitles(video);
-          setSubtitles(snapshot.options);
-          setSubtitleId(snapshot.activeId);
-          return;
-        }
-        const tracks = player.availableSubtitleTracks || [];
-        setSubtitles(
-          tracks.map((track) => ({
-            id: trackKey(track),
-            label: subtitleLabel(track) || strings.playerSubtitlesOn,
-          })),
+        const node = boxRef.current as unknown as {
+          querySelector?: (selector: string) => HTMLVideoElement | null;
+        };
+        const video = node?.querySelector?.('video');
+        if (!video) return;
+        const snapshot = readWebSubtitles(video);
+        setSubtitles((prev) =>
+          prev.length === snapshot.options.length &&
+          prev.every(
+            (track, index) =>
+              track.id === snapshot.options[index]?.id &&
+              track.label === snapshot.options[index]?.label,
+          )
+            ? prev
+            : snapshot.options,
         );
-        const active = player.subtitleTrack;
-        setSubtitleId(active ? trackKey(active) : null);
-        const audios = player.availableAudioTracks || [];
-        if (audios.length) {
-          setNativeAudioTracks(audios);
-          const current = player.audioTrack;
-          const index = current
-            ? audios.findIndex((track) => trackKey(track) === trackKey(current))
-            : 0;
-          setAudioIndex(index >= 0 ? index : 0);
-        }
+        setSubtitleId((prev) =>
+          prev === snapshot.activeId ? prev : snapshot.activeId,
+        );
       } catch {
         // Player may already be released.
       }
-    }, 400);
+    }, 1000);
     return () => clearInterval(timer);
   }, [player, sourceUrl]);
 
@@ -375,6 +372,23 @@ export function VideoPlayer({
     selectedRef.current = true;
   };
 
+  const syncSubtitleOptions = (tracks: SubtitleTrack[] | undefined) => {
+    if (Platform.OS === 'web') return;
+    const next = (tracks || []).map((track) => ({
+      id: trackKey(track),
+      label: subtitleLabel(track) || strings.playerSubtitlesOn,
+    }));
+    setSubtitles((prev) =>
+      prev.length === next.length &&
+      prev.every(
+        (track, index) =>
+          track.id === next[index]?.id && track.label === next[index]?.label,
+      )
+        ? prev
+        : next,
+    );
+  };
+
   useEventListener(
     player,
     'sourceLoad',
@@ -389,6 +403,7 @@ export function VideoPlayer({
       selectPreferredSubtitle(availableSubtitleTracks);
       if (Platform.OS !== 'web') {
         setNativeAudioTracks(availableAudioTracks || []);
+        syncSubtitleOptions(availableSubtitleTracks);
       }
     },
   );
@@ -402,6 +417,7 @@ export function VideoPlayer({
       availableSubtitleTracks: SubtitleTrack[];
     }) => {
       selectPreferredSubtitle(availableSubtitleTracks);
+      syncSubtitleOptions(availableSubtitleTracks);
     },
   );
 
@@ -411,6 +427,35 @@ export function VideoPlayer({
     ({ availableAudioTracks }: { availableAudioTracks: AudioTrack[] }) => {
       if (Platform.OS === 'web') return;
       setNativeAudioTracks(availableAudioTracks || []);
+    },
+  );
+
+  useEventListener(
+    player,
+    'subtitleTrackChange',
+    ({ subtitleTrack }: { subtitleTrack: SubtitleTrack | null }) => {
+      if (Platform.OS === 'web') return;
+      const next = subtitleTrack ? trackKey(subtitleTrack) : null;
+      setSubtitleId((prev) => (prev === next ? prev : next));
+    },
+  );
+
+  useEventListener(
+    player,
+    'timeUpdate',
+    ({ currentTime }: { currentTime: number }) => {
+      if (!useCustomControls) return;
+      const duration = Number.isFinite(player.duration) ? player.duration : 0;
+      const time = Number.isFinite(currentTime) ? currentTime : 0;
+      setClock((prev) => {
+        if (
+          Math.abs(prev.currentTime - time) < 0.2 &&
+          Math.abs(prev.duration - duration) < 0.2
+        ) {
+          return prev;
+        }
+        return { currentTime: time, duration };
+      });
     },
   );
 
@@ -647,13 +692,42 @@ export function VideoPlayer({
           onToggleFullscreen={toggleFullscreen}
           currentTime={clock.currentTime}
           duration={clock.duration}
-          onSubtitleInset={isAndroidTv() ? setSubtitleLift : undefined}
+          onSubtitleInset={
+            isAndroidTv()
+              ? (px) =>
+                  setSubtitleLift((prev) => (prev === px ? prev : px))
+              : undefined
+          }
           onSeek={(time) => {
             try {
               player.currentTime = time;
               setClock((prev) => ({ ...prev, currentTime: time }));
             } catch {
               // Seek can fail before metadata arrives.
+            }
+          }}
+          onSeekBy={(delta) => {
+            try {
+              player.seekBy(delta);
+              setClock((prev) => {
+                const cap =
+                  Number.isFinite(prev.duration) && prev.duration > 0
+                    ? prev.duration
+                    : Number.POSITIVE_INFINITY;
+                return {
+                  ...prev,
+                  currentTime: Math.min(cap, Math.max(0, prev.currentTime + delta)),
+                };
+              });
+            } catch {
+              // Fall back to an absolute seek from the last known clock.
+              try {
+                const next = Math.max(0, (player.currentTime || 0) + delta);
+                player.currentTime = next;
+                setClock((prev) => ({ ...prev, currentTime: next }));
+              } catch {
+                // Seek can fail before metadata arrives.
+              }
             }
           }}
         />

@@ -20,6 +20,7 @@ import {
 } from '../../lib/supportReminder';
 import { compareByImdbRating } from '../../lib/catalog/rating';
 import type { IndexedCatalogItem } from '../../lib/catalog/types';
+import { useIsTv } from '../../lib/tv';
 
 const FAVORITE_CAROUSEL_LIMIT = 5;
 
@@ -38,10 +39,17 @@ export default function HomeScreen() {
   const homeFocused = useIsFocused();
   const tabBarPad = useFloatingTabBarPadding();
   const { isTablet, isDesktop, gutter, posterWidth } = useLayout();
-  const favoriteLimit = isDesktop ? 12 : isTablet ? 8 : FAVORITE_CAROUSEL_LIMIT;
-  const shelfLimit = isDesktop ? 20 : isTablet ? 16 : 12;
+  const isTv = useIsTv();
+  const favoriteLimit = isTv
+    ? 6
+    : isDesktop
+      ? 12
+      : isTablet
+        ? 8
+        : FAVORITE_CAROUSEL_LIMIT;
+  const shelfLimit = isTv ? 8 : isDesktop ? 20 : isTablet ? 16 : 12;
   const favoriteCards = favorites.slice(0, favoriteLimit);
-  const watchingCards = continueWatching.slice(0, isDesktop ? 12 : 8);
+  const watchingCards = continueWatching.slice(0, isTv ? 6 : isDesktop ? 12 : 8);
   const movies2026 = useMemo(
     () =>
       movies

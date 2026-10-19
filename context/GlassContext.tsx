@@ -14,6 +14,7 @@ import {
 import { StyleSheet, View } from 'react-native';
 import { ScreenBackdrop } from '../components/ScreenBackdrop';
 import { colors } from '../constants/theme';
+import { isAndroidTv } from '../lib/tv';
 
 export const GlassTargetContext = createContext<RefObject<View | null> | null>(
   null,
@@ -54,11 +55,13 @@ export function GlassScreen({
   const contentTargetRef = useRef<View | null>(null);
   const focused = useIsFocused();
   const tabBarBlur = useContext(TabBarBlurTargetContext);
+  // TV uses solid chrome; keep a single backdrop instead of dual BlurTarget trees.
+  const useTabBarCapture = captureTabBarBlur && !isAndroidTv();
 
   useEffect(() => {
-    if (!captureTabBarBlur || !focused) return;
+    if (!useTabBarCapture || !focused) return;
     tabBarBlur?.register(contentTargetRef);
-  }, [captureTabBarBlur, focused, tabBarBlur]);
+  }, [useTabBarCapture, focused, tabBarBlur]);
 
   return (
     <GlassTargetContext.Provider value={boxTargetRef}>
@@ -71,7 +74,7 @@ export function GlassScreen({
         >
           <ScreenBackdrop />
         </BlurTargetView>
-        {captureTabBarBlur ? (
+        {useTabBarCapture ? (
           <BlurTargetView
             ref={contentTargetRef}
             collapsable={false}

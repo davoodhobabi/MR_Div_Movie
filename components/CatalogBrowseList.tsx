@@ -44,7 +44,7 @@ export function CatalogBrowseList({
     () => (query.trim() ? filterCatalog(items, query) : items),
     [items, query],
   );
-  const pageSize = columns * 6;
+  const pageSize = isTv ? columns * 3 : columns * 6;
   const [shown, setShown] = useState(pageSize);
   const paging = useRef(false);
 
@@ -97,10 +97,10 @@ export function CatalogBrowseList({
         ]}
         showsVerticalScrollIndicator={false}
         initialNumToRender={pageSize}
-        maxToRenderPerBatch={pageSize}
-        windowSize={3}
-        updateCellsBatchingPeriod={80}
-        removeClippedSubviews={Platform.OS !== 'web' && !isTv}
+        maxToRenderPerBatch={isTv ? columns * 2 : pageSize}
+        windowSize={isTv ? 2 : 3}
+        updateCellsBatchingPeriod={isTv ? 120 : 80}
+        removeClippedSubviews={Platform.OS !== 'web'}
         getItemLayout={(_, index) => ({
           length: rowStride,
           offset: rowStride * Math.floor(index / columns),

@@ -72,6 +72,8 @@ export function HomeTitleCard({
       ? Math.round(Math.max(0, Math.min(1, progress)) * 100)
       : null;
   const isTv = useIsTv();
+  // Dual poster decode + live blur per card melts Android TV GPUs.
+  const useLite = lite || isTv;
   const tvFocus = useTvFocus();
 
   useEffect(() => {
@@ -126,7 +128,7 @@ export function HomeTitleCard({
     >
         <BlurTargetView ref={posterTargetRef} collapsable={false} style={styles.fill}>
           {showPoster ? (
-            lite ? (
+            useLite ? (
               <PosterImage
                 uri={posterSourceUri as string}
                 style={styles.fill}
@@ -162,7 +164,7 @@ export function HomeTitleCard({
         <View style={styles.overlay} pointerEvents="box-none">
           <View style={styles.badges} pointerEvents="box-none">
             <View style={styles.markSpacer} />
-            {lite ? (
+            {useLite ? (
               <View style={[styles.kindChip, styles.kindChipLite]}>
                 <Text style={styles.kindText}>{kind}</Text>
               </View>
@@ -180,7 +182,7 @@ export function HomeTitleCard({
           </View>
 
           <View style={styles.copyWrap}>
-            {lite ? (
+            {useLite ? (
               <View style={[styles.copyBlur, styles.copyLite]}>
               <View {...ltrProps} style={[styles.copyInner, ltrStyle]}>
                 {persian ? (
