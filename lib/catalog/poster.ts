@@ -234,12 +234,21 @@ export async function getPosterUrl(query: PosterQuery): Promise<string | null> {
   return request;
 }
 
-export function usePosterUrl(item: CatalogItem): string | null {
+/**
+ * Resolve a poster URL. Pass `enabled: false` until the card is near the
+ * viewport so shelves/grids do not stampede the network on first paint.
+ */
+export function usePosterUrl(
+  item: CatalogItem,
+  enabled: boolean = true,
+): string | null {
+  const imdbId = normalizeImdbId(item.imdbId);
   const [url, setUrl] = useState<string | null>(
-    () => memory.get(normalizeImdbId(item.imdbId)) ?? null,
+    () => memory.get(imdbId) ?? null,
   );
 
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     let attempt = 0;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
@@ -265,7 +274,14 @@ export function usePosterUrl(item: CatalogItem): string | null {
       cancelled = true;
       if (retryTimer) clearTimeout(retryTimer);
     };
-  }, [item.imdbId, item.title, item.titleFa, item.year, item.type]);
+  }, [
+    enabled,
+    item.imdbId,
+    item.title,
+    item.titleFa,
+    item.year,
+    item.type,
+  ]);
 
   return url;
 }

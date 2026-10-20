@@ -1,6 +1,6 @@
 import { BlurTargetView, BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { PixelRatio, Pressable, StyleSheet, Text, View } from 'react-native';
 import { strings } from '../constants/strings';
 import { colors, fonts, radii } from '../constants/theme';
@@ -25,11 +25,13 @@ type HomeTitleCardProps = {
   favorited?: boolean;
   onToggleFavorite?: () => void;
   onRemoveWatching?: () => void;
-  /** Grid cells skip the second poster decode and live blur. */
+  /** Skip second poster decode and live blur (default on for perf). */
   lite?: boolean;
+  /** When false, poster network work is deferred until the cell is visible. */
+  active?: boolean;
 };
 
-export function HomeTitleCard({
+function HomeTitleCardInner({
   item,
   onPress,
   progress,
@@ -39,9 +41,10 @@ export function HomeTitleCard({
   favorited = false,
   onToggleFavorite,
   onRemoveWatching,
-  lite = false,
+  lite = true,
+  active = true,
 }: HomeTitleCardProps) {
-  const posterUrl = usePosterUrl(item);
+  const posterUrl = usePosterUrl(item, active);
   const posterTargetRef = useRef<View | null>(null);
   const [posterFailed, setPosterFailed] = useState(false);
   const [posterAttempt, setPosterAttempt] = useState(0);
@@ -72,7 +75,7 @@ export function HomeTitleCard({
       ? Math.round(Math.max(0, Math.min(1, progress)) * 100)
       : null;
   const isTv = useIsTv();
-  // Dual poster decode + live blur per card melts Android TV GPUs.
+  // Dual poster decode + live blur per card melts Android / TV GPUs.
   const useLite = lite || isTv;
   const tvFocus = useTvFocus();
 
@@ -118,48 +121,59 @@ export function HomeTitleCard({
     </Pressable>
   );
 
+  const poster = showPoster ? (
+    useLite ? (
+      <PosterImage
+        uri={posterSourceUri as string}
+        style={styles.fill}
+        resizeMode="cover"
+        recyclingKey={item.imdbId}
+        onError={retryPoster}
+      />
+    ) : (
+      <>
+        <PosterImage
+          uri={posterSourceUri as string}
+          style={styles.fill}
+          resizeMode="cover"
+          recyclingKey={`${item.imdbId}-bg`}
+        />
+        <PosterImage
+          uri={posterSourceUri as string}
+          style={styles.fill}
+          resizeMode="contain"
+          recyclingKey={item.imdbId}
+          onError={retryPoster}
+        />
+      </>
+    )
+  ) : (
+    <View style={[styles.fill, styles.placeholder]}>
+      <Ionicons
+        name={isSeriesItem(item) ? 'tv-outline' : 'film-outline'}
+        size={28}
+        color={colors.textDim}
+      />
+    </View>
+  );
+
   return (
     <View style={{ width: frameWidth, height: frameHeight }}>
-    <Pressable
-      onPress={onPress}
-      {...tvFocus.props}
-      style={({ pressed }) => [styles.frame, styles.fill, pressed && styles.pressed]}
-      accessibilityRole="button"
-    >
-        <BlurTargetView ref={posterTargetRef} collapsable={false} style={styles.fill}>
-          {showPoster ? (
-            useLite ? (
-              <PosterImage
-                uri={posterSourceUri as string}
-                style={styles.fill}
-                resizeMode="cover"
-                onError={retryPoster}
-              />
-            ) : (
-              <>
-                <PosterImage
-                  uri={posterSourceUri as string}
-                  style={styles.fill}
-                  resizeMode="cover"
-                />
-                <PosterImage
-                  uri={posterSourceUri as string}
-                  style={styles.fill}
-                  resizeMode="contain"
-                  onError={retryPoster}
-                />
-              </>
-            )
-          ) : (
-            <View style={[styles.fill, styles.placeholder]}>
-              <Ionicons
-                name={isSeriesItem(item) ? 'tv-outline' : 'film-outline'}
-                size={28}
-                color={colors.textDim}
-              />
-            </View>
-          )}
-        </BlurTargetView>
+      <Pressable
+        onPress={onPress}
+        {...tvFocus.props}
+        style={({ pressed }) => [styles.frame, styles.fill, pressed && styles.pressed]}
+        accessibilityRole="button"
+      >
+        {useLite ? (
+          <View collapsable={false} style={styles.fill}>
+            {poster}
+          </View>
+        ) : (
+          <BlurTargetView ref={posterTargetRef} collapsable={false} style={styles.fill}>
+            {poster}
+          </BlurTargetView>
+        )}
 
         <View style={styles.overlay} pointerEvents="box-none">
           <View style={styles.badges} pointerEvents="box-none">
@@ -184,105 +198,107 @@ export function HomeTitleCard({
           <View style={styles.copyWrap}>
             {useLite ? (
               <View style={[styles.copyBlur, styles.copyLite]}>
-              <View {...ltrProps} style={[styles.copyInner, ltrStyle]}>
-                {persian ? (
-                  <Text style={styles.titleFa} numberOfLines={2}>
-                    {persian}
+                <View {...ltrProps} style={[styles.copyInner, ltrStyle]}>
+                  {persian ? (
+                    <Text style={styles.titleFa} numberOfLines={2}>
+                      {persian}
+                    </Text>
+                  ) : null}
+                  <Text
+                    style={[styles.titleEn, !persian && styles.titleEnSolo]}
+                    numberOfLines={persian ? 1 : 2}
+                  >
+                    {item.title}
                   </Text>
-                ) : null}
-                <Text
-                  style={[styles.titleEn, !persian && styles.titleEnSolo]}
-                  numberOfLines={persian ? 1 : 2}
-                >
-                  {item.title}
-                </Text>
-                <View {...ltrProps} style={[styles.meta, ltrStyle]}>
-                  {rating ? (
-                    <View style={styles.rating}>
-                      <Ionicons name="star" size={11} color={colors.gold} />
-                      <Text style={styles.ratingText}>{rating}</Text>
+                  <View {...ltrProps} style={[styles.meta, ltrStyle]}>
+                    {rating ? (
+                      <View style={styles.rating}>
+                        <Ionicons name="star" size={11} color={colors.gold} />
+                        <Text style={styles.ratingText}>{rating}</Text>
+                      </View>
+                    ) : null}
+                    {year ? <Text style={styles.metaText}>{year}</Text> : null}
+                  </View>
+                  {watching && subtitle ? (
+                    <Text style={styles.subtitle} numberOfLines={1}>
+                      {subtitle}
+                    </Text>
+                  ) : null}
+                  {watching ? (
+                    <View style={styles.progressTrack}>
+                      <View
+                        style={[
+                          styles.progressFill,
+                          {
+                            width: `${Math.max(6, Math.min(100, percent ?? 0))}%`,
+                          },
+                        ]}
+                      />
                     </View>
                   ) : null}
-                  {year ? <Text style={styles.metaText}>{year}</Text> : null}
                 </View>
-                {watching && subtitle ? (
-                  <Text style={styles.subtitle} numberOfLines={1}>
-                    {subtitle}
-                  </Text>
-                ) : null}
-                {watching ? (
-                  <View style={styles.progressTrack}>
-                    <View
-                      style={[
-                        styles.progressFill,
-                        {
-                          width: `${Math.max(6, Math.min(100, percent ?? 0))}%`,
-                        },
-                      ]}
-                    />
-                  </View>
-                ) : null}
-              </View>
               </View>
             ) : (
-            <BlurView
-              blurTarget={posterTargetRef}
-              intensity={50}
-              tint="dark"
-              blurMethod="dimezisBlurView"
-              style={styles.copyBlur}
-            >
-              <View {...ltrProps} style={[styles.copyInner, ltrStyle]}>
-                {persian ? (
-                  <Text style={styles.titleFa} numberOfLines={2}>
-                    {persian}
+              <BlurView
+                blurTarget={posterTargetRef}
+                intensity={50}
+                tint="dark"
+                blurMethod="dimezisBlurView"
+                style={styles.copyBlur}
+              >
+                <View {...ltrProps} style={[styles.copyInner, ltrStyle]}>
+                  {persian ? (
+                    <Text style={styles.titleFa} numberOfLines={2}>
+                      {persian}
+                    </Text>
+                  ) : null}
+                  <Text
+                    style={[styles.titleEn, !persian && styles.titleEnSolo]}
+                    numberOfLines={persian ? 1 : 2}
+                  >
+                    {item.title}
                   </Text>
-                ) : null}
-                <Text
-                  style={[styles.titleEn, !persian && styles.titleEnSolo]}
-                  numberOfLines={persian ? 1 : 2}
-                >
-                  {item.title}
-                </Text>
-                <View {...ltrProps} style={[styles.meta, ltrStyle]}>
-                  {rating ? (
-                    <View style={styles.rating}>
-                      <Ionicons name="star" size={11} color={colors.gold} />
-                      <Text style={styles.ratingText}>{rating}</Text>
+                  <View {...ltrProps} style={[styles.meta, ltrStyle]}>
+                    {rating ? (
+                      <View style={styles.rating}>
+                        <Ionicons name="star" size={11} color={colors.gold} />
+                        <Text style={styles.ratingText}>{rating}</Text>
+                      </View>
+                    ) : null}
+                    {year ? <Text style={styles.metaText}>{year}</Text> : null}
+                  </View>
+                  {watching && subtitle ? (
+                    <Text style={styles.subtitle} numberOfLines={1}>
+                      {subtitle}
+                    </Text>
+                  ) : null}
+                  {watching ? (
+                    <View style={styles.progressTrack}>
+                      <View
+                        style={[
+                          styles.progressFill,
+                          {
+                            width: `${Math.max(6, Math.min(100, percent ?? 0))}%`,
+                          },
+                        ]}
+                      />
                     </View>
                   ) : null}
-                  {year ? <Text style={styles.metaText}>{year}</Text> : null}
                 </View>
-                {watching && subtitle ? (
-                  <Text style={styles.subtitle} numberOfLines={1}>
-                    {subtitle}
-                  </Text>
-                ) : null}
-                {watching ? (
-                  <View style={styles.progressTrack}>
-                    <View
-                      style={[
-                        styles.progressFill,
-                        {
-                          width: `${Math.max(6, Math.min(100, percent ?? 0))}%`,
-                        },
-                      ]}
-                    />
-                  </View>
-                ) : null}
-              </View>
-            </BlurView>
+              </BlurView>
             )}
           </View>
         </View>
-    </Pressable>
-    {tvFocus.focused ? (
-      <View pointerEvents="none" style={styles.tvFocusRing} />
-    ) : null}
-    {mark}
+      </Pressable>
+      {tvFocus.focused ? (
+        <View pointerEvents="none" style={styles.tvFocusRing} />
+      ) : null}
+      {mark}
     </View>
   );
 }
+
+export const HomeTitleCard = memo(HomeTitleCardInner);
 
 const styles = StyleSheet.create({
   pressed: {

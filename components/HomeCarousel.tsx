@@ -1,6 +1,20 @@
 import { Ionicons } from '@expo/vector-icons';
-import type { ReactNode } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactElement,
+} from 'react';
+import {
+  FlatList,
+  Platform,
+  StyleSheet,
+  Text,
+  View,
+  type ListRenderItemInfo,
+  type ViewToken,
+} from 'react-native';
 import { strings } from '../constants/strings';
 import { colors, fonts, radii, spacing } from '../constants/theme';
 import { useLayout } from '../lib/layout';
@@ -8,29 +22,89 @@ import { useIsTv } from '../lib/tv';
 import { Glass } from './Glass';
 import { TvPressable } from './TvPressable';
 
-type HomeCarouselProps = {
+type HomeCarouselProps<T> = {
   title: string;
   icon: keyof typeof Ionicons.glyphMap;
   iconColor?: string;
   onSeeAll?: () => void;
-  children: ReactNode;
+  data: T[];
+  keyExtractor: (item: T, index: number) => string;
+  renderItem: (info: { item: T; active: boolean }) => ReactElement | null;
   empty?: boolean;
   emptyTitle?: string;
   emptyHint?: string;
+  /** Estimated card width for getItemLayout (defaults to layout posterWidth). */
+  itemWidth?: number;
 };
 
-export function HomeCarousel({
+export function HomeCarousel<T>({
   title,
   icon,
   iconColor = colors.accent,
   onSeeAll,
-  children,
+  data,
+  keyExtractor,
+  renderItem,
   empty = false,
   emptyTitle,
   emptyHint,
-}: HomeCarouselProps) {
+  itemWidth: _itemWidth,
+}: HomeCarouselProps<T>) {
   const { gutter, gridGap } = useLayout();
   const isTv = useIsTv();
+  const initialVisible = isTv ? 5 : 6;
+
+  const seedActive = useCallback(() => {
+    const next = new Set<string>();
+    for (let i = 0; i < Math.min(initialVisible, data.length); i += 1) {
+      next.add(keyExtractor(data[i], i));
+    }
+    return next;
+  }, [data, initialVisible, keyExtractor]);
+
+  const [activeKeys, setActiveKeys] = useState<Set<string>>(seedActive);
+
+  useEffect(() => {
+    setActiveKeys(seedActive());
+  }, [seedActive]);
+
+  const viewabilityConfig = useRef({
+    itemVisiblePercentThreshold: 10,
+    minimumViewTime: 40,
+  }).current;
+
+  const onViewableItemsChanged = useRef(
+    ({ viewableItems }: { viewableItems: ViewToken[] }) => {
+      setActiveKeys((prev) => {
+        const next = new Set<string>();
+        for (const token of viewableItems) {
+          if (token.key != null) next.add(String(token.key));
+        }
+        // Keep a small look-ahead so scrolling feels instant.
+        if (next.size === 0) return prev;
+        let changed = prev.size !== next.size;
+        if (!changed) {
+          for (const key of next) {
+            if (!prev.has(key)) {
+              changed = true;
+              break;
+            }
+          }
+        }
+        return changed ? next : prev;
+      });
+    },
+  ).current;
+
+  const listRenderItem = useCallback(
+    ({ item, index }: ListRenderItemInfo<T>) => {
+      const key = keyExtractor(item, index);
+      const active = activeKeys.has(key) || index < initialVisible;
+      return renderItem({ item, active });
+    },
+    [activeKeys, initialVisible, keyExtractor, renderItem],
+  );
+
   return (
     <View style={styles.section}>
       <View style={[styles.header, { paddingHorizontal: gutter }]}>
@@ -61,15 +135,25 @@ export function HomeCarousel({
           {emptyHint ? <Text style={styles.emptyHint}>{emptyHint}</Text> : null}
         </Glass>
       ) : (
-        <ScrollView
+        <FlatList
           horizontal
+          data={data}
+          keyExtractor={keyExtractor}
+          renderItem={listRenderItem}
           showsHorizontalScrollIndicator={false}
-          removeClippedSubviews={isTv}
-          contentContainerStyle={[styles.track, { paddingHorizontal: gutter, gap: gridGap }]}
+          contentContainerStyle={[
+            styles.track,
+            { paddingHorizontal: gutter, gap: gridGap },
+          ]}
           style={styles.scroller}
-        >
-          {children}
-        </ScrollView>
+          initialNumToRender={initialVisible}
+          maxToRenderPerBatch={isTv ? 3 : 4}
+          windowSize={isTv ? 2 : 3}
+          updateCellsBatchingPeriod={isTv ? 120 : 50}
+          removeClippedSubviews={Platform.OS !== 'web'}
+          viewabilityConfig={viewabilityConfig}
+          onViewableItemsChanged={onViewableItemsChanged}
+        />
       )}
     </View>
   );

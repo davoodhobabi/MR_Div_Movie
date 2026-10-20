@@ -1,7 +1,6 @@
 import {
   ActivityIndicator,
   Alert,
-  Image,
   Linking,
   Platform,
   ScrollView,
@@ -12,6 +11,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { EditionDivider } from '../../components/EditionDivider';
 import { Glass } from '../../components/Glass';
+import { PosterImage } from '../../components/PosterImage';
 import { SeriesPicker } from '../../components/SeriesPicker';
 import { SourceButton } from '../../components/SourceButton';
 import { TvPressable } from '../../components/TvPressable';
@@ -377,11 +377,12 @@ export default function TitleScreen() {
               ]}
             >
               {showPoster ? (
-                <Image
-                  source={{ uri: posterUrl as string }}
+                <PosterImage
+                  uri={posterUrl as string}
                   style={styles.desktopPosterImage}
                   resizeMode="cover"
-                  fadeDuration={0}
+                  recyclingKey={`hero-${item?.imdbId ?? 'desktop'}`}
+                  priority="high"
                   onError={() => setPosterFailed(true)}
                 />
               ) : (
@@ -407,8 +408,8 @@ export default function TitleScreen() {
             style={[styles.stickyPoster, { height: posterHeight }]}
           >
             {showPoster ? (
-              <Image
-                source={{ uri: posterUrl as string }}
+              <PosterImage
+                uri={posterUrl as string}
                 style={[
                   styles.stickyPosterImage,
                   {
@@ -416,8 +417,9 @@ export default function TitleScreen() {
                     height: stickyPosterImageHeight,
                   },
                 ]}
-                resizeMode="stretch"
-                fadeDuration={0}
+                resizeMode="cover"
+                recyclingKey={`hero-${item?.imdbId ?? 'mobile'}`}
+                priority="high"
                 onError={() => setPosterFailed(true)}
               />
             ) : (

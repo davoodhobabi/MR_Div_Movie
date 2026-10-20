@@ -36,6 +36,8 @@ const TvControlVisibility = createContext<{
   onControlBlur: () => void;
   /** Fullscreen transport surface. Up from a control returns here so left/right can seek. */
   seekTag: number | null;
+  /** When a sheet menu is open, keep D-pad inside the sheet/bar instead of the video. */
+  sheetOpen: boolean;
 } | null>(null);
 
 const TV_SEEK_STEP = 10;
@@ -402,9 +404,24 @@ export function WebPlayerControls({
   const [playTag, setPlayTag] = useState<number | null>(null);
   const [seekPreferred, setSeekPreferred] = useState(false);
   const [barPreferred, setBarPreferred] = useState(false);
+  const [sheetPreferred, setSheetPreferred] = useState(false);
   const [controlsFocused, setControlsFocused] = useState(false);
   const fullscreenRef = useRef(fullscreen);
   fullscreenRef.current = fullscreen;
+  const sheetMenu = menu === 'audio' || menu === 'subs' || menu === 'speed';
+
+  useEffect(() => {
+    if (!tvMode || !sheetMenu) {
+      setSheetPreferred(false);
+      return;
+    }
+    // Drop bar/surface preferred focus, then land on the sheet after it mounts.
+    setBarPreferred(false);
+    setSeekPreferred(false);
+    setSheetPreferred(false);
+    const timer = setTimeout(() => setSheetPreferred(true), 50);
+    return () => clearTimeout(timer);
+  }, [menu, sheetMenu, tvMode]);
 
   const syncSeekTags = () => {
     const seek = catcherRef.current ? findNodeHandle(catcherRef.current) : null;
@@ -577,13 +594,22 @@ export function WebPlayerControls({
       : 'volume-high';
 
   return (
-    <TvControlVisibility.Provider value={{ onControlFocus, onControlBlur, seekTag: tvMode && fullscreen ? seekTag : null }}>
+    <TvControlVisibility.Provider
+      value={{
+        onControlFocus,
+        onControlBlur,
+        seekTag: tvMode && fullscreen && !sheetMenu ? seekTag : null,
+        sheetOpen: Boolean(tvMode && sheetMenu),
+      }}
+    >
     <View ref={rootRef} style={styles.root} pointerEvents="box-none">
       <View
         ref={catcherRef}
         style={styles.catcher}
-        focusable={Boolean(tvMode && (fullscreen || !controlsFocused))}
-        hasTVPreferredFocus={Boolean(tvMode && fullscreen && seekPreferred)}
+        focusable={Boolean(tvMode && (fullscreen || !controlsFocused) && !sheetMenu)}
+        hasTVPreferredFocus={Boolean(
+          tvMode && fullscreen && seekPreferred && !sheetMenu,
+        )}
         onLayout={tvMode ? syncSeekTags : undefined}
         onFocus={
           tvMode
@@ -725,17 +751,22 @@ export function WebPlayerControls({
             pointerEvents="box-none"
             onLayout={tvMode ? reportSubtitleInset : undefined}
           >
-          {menu === 'audio' || menu === 'subs' || menu === 'speed' ? (
+          {sheetMenu ? (
             <View style={styles.sheet}>
               {menu === 'speed' ? (
                 <View style={styles.speedRow}>
-                  {SPEEDS.map((value) => (
+                  {SPEEDS.map((value) => {
+                    const preferredSpeed = (SPEEDS as readonly number[]).includes(rate)
+                      ? rate
+                      : SPEEDS[0];
+                    return (
                     <ControlPressable
                       key={value}
                       onPress={() => {
                         onRate(value);
                         setMenu(null);
                       }}
+                      hasTVPreferredFocus={sheetPreferred && value === preferredSpeed}
                       accessibilityRole="button"
                       accessibilityLabel={strings.playerSpeedLabel(value)}
                       style={[styles.speedChip, rate === value && styles.speedChipOn]}
@@ -744,7 +775,8 @@ export function WebPlayerControls({
                         {faNum(value)}×
                       </Text>
                     </ControlPressable>
-                  ))}
+                    );
+                  })}
                 </View>
               ) : null}
               {menu === 'audio'
@@ -754,6 +786,10 @@ export function WebPlayerControls({
                         key={`${label}-${index}`}
                         label={label}
                         selected={index === audioIndex}
+                        preferFocus={
+                          sheetPreferred &&
+                          index === Math.min(Math.max(0, audioIndex), audioLabels.length - 1)
+                        }
                         onPress={() => {
                           onSelectAudio(index);
                           setMenu(null);
@@ -767,6 +803,11 @@ export function WebPlayerControls({
                   <SheetRow
                     label={strings.playerSubtitleOff}
                     selected={subtitleId == null}
+                    preferFocus={
+                      sheetPreferred &&
+                      (subtitleId == null ||
+                        !subtitles.some((track) => track.id === subtitleId))
+                    }
                     onPress={() => {
                       onSelectSubtitle(null);
                       setMenu(null);
@@ -778,6 +819,7 @@ export function WebPlayerControls({
                         key={track.id}
                         label={track.label}
                         selected={track.id === subtitleId}
+                        preferFocus={sheetPreferred && track.id === subtitleId}
                         onPress={() => {
                           onSelectSubtitle(track.id);
                           setMenu(null);
@@ -815,7 +857,7 @@ export function WebPlayerControls({
               label={playing ? strings.playerPauseLabel : strings.playerPlayLabel}
               large
               compact={compact}
-              preferFocus={barPreferred}
+              preferFocus={barPreferred && !sheetMenu}
               onPress={onTogglePlay}
               onLayout={tvMode ? syncSeekTags : undefined}
             />
@@ -899,7 +941,7 @@ function ControlPressable({
 }: ComponentProps<typeof Pressable> & { hostRef?: Ref<View> }) {
   const tv = useContext(TvControlVisibility);
   const up =
-    tv?.seekTag != null
+    tv?.seekTag != null && !tv.sheetOpen
       ? ({ nextFocusUp: tv.seekTag } as { nextFocusUp?: number })
       : null;
   if (!isAndroidTv() || !tv) return <Pressable ref={hostRef} {...props} />;
@@ -968,14 +1010,17 @@ function SheetRow({
   label,
   selected,
   onPress,
+  preferFocus,
 }: {
   label: string;
   selected: boolean;
   onPress: () => void;
+  preferFocus?: boolean;
 }) {
   return (
     <ControlPressable
       onPress={onPress}
+      hasTVPreferredFocus={preferFocus}
       accessibilityRole="button"
       accessibilityState={{ selected }}
       style={({ pressed }) => [styles.sheetRow, pressed && styles.pressed]}

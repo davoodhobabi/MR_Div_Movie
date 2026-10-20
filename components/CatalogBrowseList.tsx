@@ -1,7 +1,15 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { FlatList, PixelRatio, Platform, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  FlatList,
+  PixelRatio,
+  Platform,
+  StyleSheet,
+  Text,
+  View,
+  type ViewToken,
+} from 'react-native';
 import { strings } from '../constants/strings';
 import { colors, fonts, spacing } from '../constants/theme';
 import { useCatalog } from '../context/CatalogContext';
@@ -47,22 +55,51 @@ export function CatalogBrowseList({
   const pageSize = isTv ? columns * 3 : columns * 6;
   const [shown, setShown] = useState(pageSize);
   const paging = useRef(false);
+  const [activeKeys, setActiveKeys] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     setShown(pageSize);
     paging.current = false;
+    setActiveKeys(new Set());
   }, [query, pageSize, items]);
 
   const data = useMemo(() => visible.slice(0, shown), [visible, shown]);
   const cardHeight = Math.floor(PixelRatio.roundToNearestPixel(cardWidth * 1.5));
   const rowStride = cardHeight + gridGap;
 
-  const openTitle = (item: IndexedCatalogItem) => {
+  const openTitle = useCallback((item: IndexedCatalogItem) => {
     router.push({
       pathname: '/title/[id]',
       params: { id: item.imdbId },
     });
-  };
+  }, []);
+
+  const viewabilityConfig = useRef({
+    itemVisiblePercentThreshold: 15,
+    minimumViewTime: 40,
+  }).current;
+
+  const onViewableItemsChanged = useRef(
+    ({ viewableItems }: { viewableItems: ViewToken[] }) => {
+      setActiveKeys((prev) => {
+        const next = new Set<string>();
+        for (const token of viewableItems) {
+          if (token.key != null) next.add(String(token.key));
+        }
+        if (next.size === 0) return prev;
+        let changed = prev.size !== next.size;
+        if (!changed) {
+          for (const key of next) {
+            if (!prev.has(key)) {
+              changed = true;
+              break;
+            }
+          }
+        }
+        return changed ? next : prev;
+      });
+    },
+  ).current;
 
   const countLabel = strings.browseCount(visible.length.toLocaleString('fa-IR'));
 
@@ -97,7 +134,7 @@ export function CatalogBrowseList({
         ]}
         showsVerticalScrollIndicator={false}
         initialNumToRender={pageSize}
-        maxToRenderPerBatch={isTv ? columns * 2 : pageSize}
+        maxToRenderPerBatch={isTv ? columns * 2 : columns * 3}
         windowSize={isTv ? 2 : 3}
         updateCellsBatchingPeriod={isTv ? 120 : 80}
         removeClippedSubviews={Platform.OS !== 'web'}
@@ -106,6 +143,8 @@ export function CatalogBrowseList({
           offset: rowStride * Math.floor(index / columns),
           index,
         })}
+        viewabilityConfig={viewabilityConfig}
+        onViewableItemsChanged={onViewableItemsChanged}
         onEndReachedThreshold={0.8}
         onEndReached={() => {
           if (paging.current || shown >= visible.length) return;
@@ -115,16 +154,21 @@ export function CatalogBrowseList({
         onContentSizeChange={() => {
           paging.current = false;
         }}
-        renderItem={({ item }) => (
-          <HomeTitleCard
-            item={item}
-            width={cardWidth}
-            lite
-            favorited={isFavorite(item.imdbId)}
-            onToggleFavorite={() => toggleFavorite(item.imdbId)}
-            onPress={() => openTitle(item)}
-          />
-        )}
+        renderItem={({ item, index }) => {
+          const key = `${item.imdbId}-${item.index}`;
+          const active = activeKeys.has(key) || index < pageSize;
+          return (
+            <HomeTitleCard
+              item={item}
+              width={cardWidth}
+              lite
+              active={active}
+              favorited={isFavorite(item.imdbId)}
+              onToggleFavorite={() => toggleFavorite(item.imdbId)}
+              onPress={() => openTitle(item)}
+            />
+          );
+        }}
         ListEmptyComponent={
           <View style={styles.empty}>
             <Glass style={styles.emptyIcon}>

@@ -162,6 +162,7 @@ export ANDROID_SDK_ROOT="$ANDROID_HOME"
 export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$PATH"
 
 node scripts/patch-expo-video-ffmpeg.js
+node scripts/sync-android-splash.cjs
 printf 'sdk.dir=%s\n' "$ANDROID_HOME" > android/local.properties
 
 VERSION="$(node -e "console.log(require('./app.json').expo.version)")"
@@ -179,14 +180,30 @@ perl -i -pe "s/versionName\\s+\\\"[^\\\"]+\\\"/versionName \\\"$VERSION\\\"/" an
 APK_SRC="android/app/build/outputs/apk/release/app-release.apk"
 RELEASES_DIR="$ROOT/releases"
 DOWNLOADS_DIR="$ROOT/host/downloads"
-mkdir -p "$RELEASES_DIR/android" "$RELEASES_DIR/tv" "$RELEASES_DIR/web" "$DOWNLOADS_DIR"
-APK_ANDROID="$RELEASES_DIR/android/MrDiv_Movie-${VERSION}.apk"
-APK_TV="$RELEASES_DIR/tv/MrDiv_Movie-${VERSION}-android-tv.apk"
-APK_WEB="$DOWNLOADS_DIR/MrDiv_Movie.apk"
+PUBLIC_DOWNLOADS="$ROOT/public/downloads"
+DIST_DOWNLOADS="$ROOT/host/dist/downloads"
+mkdir -p "$RELEASES_DIR/android" "$RELEASES_DIR/tv" "$RELEASES_DIR/web" \
+  "$DOWNLOADS_DIR" "$PUBLIC_DOWNLOADS" "$DIST_DOWNLOADS"
+# One dual APK (phone + TV). Archive names carry version + versionCode + target.
+APK_ANDROID="$RELEASES_DIR/android/MrDiv_Movie-${VERSION}-vc${VERSION_CODE}-phone.apk"
+APK_TV="$RELEASES_DIR/tv/MrDiv_Movie-${VERSION}-vc${VERSION_CODE}-tv.apk"
+APK_WEB="$DOWNLOADS_DIR/MrDiv_Movie-${VERSION}-vc${VERSION_CODE}.apk"
+# Stable download names for the website (always overwritten).
+APK_WEB_STABLE="$DOWNLOADS_DIR/MrDiv_Movie.apk"
+APK_SITE_PHONE="$PUBLIC_DOWNLOADS/android.apk"
+APK_SITE_TV="$PUBLIC_DOWNLOADS/android-tv.apk"
 cp "$APK_SRC" "$APK_ANDROID"
 cp "$APK_SRC" "$APK_TV"
 cp "$APK_SRC" "$APK_WEB"
-ls -lh "$APK_SRC" "$APK_ANDROID" "$APK_TV" "$APK_WEB"
+cp "$APK_SRC" "$APK_WEB_STABLE"
+cp "$APK_SRC" "$APK_SITE_PHONE"
+cp "$APK_SRC" "$APK_SITE_TV"
+cp "$APK_SRC" "$DIST_DOWNLOADS/android.apk"
+cp "$APK_SRC" "$DIST_DOWNLOADS/android-tv.apk"
+cp "$APK_SRC" "$DOWNLOADS_DIR/android.apk"
+cp "$APK_SRC" "$DOWNLOADS_DIR/android-tv.apk"
+ls -lh "$APK_SRC" "$APK_ANDROID" "$APK_TV" "$APK_WEB" "$APK_WEB_STABLE" \
+  "$APK_SITE_PHONE" "$APK_SITE_TV"
 
 if command -v adb >/dev/null 2>&1 && adb devices 2>/dev/null | awk 'NR>1 && $2=="device"{found=1} END{exit !found}'; then
   adb devices -l

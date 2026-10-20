@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useIsFocused } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFloatingTabBarPadding } from '../../lib/tabBarInset';
@@ -19,10 +19,16 @@ import {
   shouldShowSupportReminder,
 } from '../../lib/supportReminder';
 import { compareByImdbRating } from '../../lib/catalog/rating';
+import type { ContinueWatchingEntry } from '../../lib/catalog/continueWatching';
 import type { IndexedCatalogItem } from '../../lib/catalog/types';
 import { useIsTv } from '../../lib/tv';
 
 const FAVORITE_CAROUSEL_LIMIT = 5;
+
+type WatchingRow = {
+  item: IndexedCatalogItem;
+  entry: ContinueWatchingEntry;
+};
 
 export default function HomeScreen() {
   const {
@@ -87,18 +93,95 @@ export default function HomeScreen() {
     void markSupportReminderSeen();
   };
 
-  const openTitle = (item: IndexedCatalogItem) => {
+  const openTitle = useCallback((item: IndexedCatalogItem) => {
     router.push({
       pathname: '/title/[id]',
       params: { id: item.imdbId },
     });
-  };
+  }, []);
+
+  const catalogKey = useCallback(
+    (item: IndexedCatalogItem) => `${item.imdbId}-${item.index}`,
+    [],
+  );
+
+  const renderCatalogCard = useCallback(
+    ({ item, active }: { item: IndexedCatalogItem; active: boolean }) => (
+      <HomeTitleCard
+        item={item}
+        width={posterWidth}
+        active={active}
+        favorited={isFavorite(item.imdbId)}
+        onToggleFavorite={() => toggleFavorite(item.imdbId)}
+        onPress={() => openTitle(item)}
+      />
+    ),
+    [isFavorite, openTitle, posterWidth, toggleFavorite],
+  );
+
+  const renderFavoriteCard = useCallback(
+    ({ item, active }: { item: IndexedCatalogItem; active: boolean }) => (
+      <HomeTitleCard
+        item={item}
+        width={posterWidth}
+        active={active}
+        variant="favorite"
+        favorited
+        onPress={() => openTitle(item)}
+      />
+    ),
+    [openTitle, posterWidth],
+  );
+
+  const watchingKey = useCallback(
+    (row: WatchingRow) => `${row.item.imdbId}-${row.entry.updatedAt}`,
+    [],
+  );
+
+  const renderWatchingCard = useCallback(
+    ({ item: row, active }: { item: WatchingRow; active: boolean }) => {
+      const { item, entry } = row;
+      const ratio = entry.duration > 0 ? entry.position / entry.duration : 0;
+      const percent = Math.round(ratio * 100).toLocaleString('fa-IR');
+      return (
+        <HomeTitleCard
+          item={item}
+          width={posterWidth}
+          active={active}
+          variant="watching"
+          progress={ratio}
+          subtitle={
+            entry.duration > 0
+              ? strings.continuePercent(percent)
+              : entry.sourceTitle
+          }
+          onRemoveWatching={() => dismissContinueWatching(item.imdbId)}
+          onPress={() =>
+            router.push({
+              pathname: '/title/[id]',
+              params: {
+                id: item.imdbId,
+                resumeUri: entry.uri,
+                resumeKey: entry.key,
+                resumeAt: String(Math.floor(entry.position)),
+                resumeTitle: entry.sourceTitle,
+                resumeEdition: entry.edition,
+                resumeReferer: entry.referer ?? '',
+              },
+            })
+          }
+        />
+      );
+    },
+    [dismissContinueWatching, posterWidth],
+  );
 
   return (
     <GlassScreen captureTabBarBlur>
       <SafeAreaView style={styles.safe} edges={['top']}>
         <ScrollView
           showsVerticalScrollIndicator={false}
+          removeClippedSubviews={isTv}
           contentContainerStyle={[styles.content, { paddingBottom: tabBarPad }]}
         >
           <View style={[styles.topBar, isTablet && styles.topBarWide, { paddingHorizontal: gutter }]}>
@@ -113,107 +196,60 @@ export default function HomeScreen() {
           </View>
 
           {favoriteCards.length > 0 ? (
-          <HomeCarousel
-            title={strings.favoritesTitle}
-            icon="heart"
-            onSeeAll={() => router.push('/favorites')}
-          >
-            {favoriteCards.map((item) => (
-              <HomeTitleCard
-                key={`${item.imdbId}-${item.index}`}
-                item={item}
-                width={posterWidth}
-                variant="favorite"
-                favorited
-                onPress={() => openTitle(item)}
-              />
-            ))}
-          </HomeCarousel>
+            <HomeCarousel
+              title={strings.favoritesTitle}
+              icon="heart"
+              onSeeAll={() => router.push('/favorites')}
+              data={favoriteCards}
+              keyExtractor={catalogKey}
+              renderItem={renderFavoriteCard}
+              itemWidth={posterWidth}
+            />
           ) : null}
 
           {watchingCards.length > 0 ? (
-          <HomeCarousel
-            title={strings.nowPlayingSection}
-            icon="play-circle"
-            iconColor={colors.gold}
-          >
-            {watchingCards.map(({ item, entry }) => {
-              const ratio =
-                entry.duration > 0 ? entry.position / entry.duration : 0;
-              const percent = Math.round(ratio * 100).toLocaleString('fa-IR');
-              return (
-                <HomeTitleCard
-                  key={`${item.imdbId}-${entry.updatedAt}`}
-                  item={item}
-                  width={posterWidth}
-                  variant="watching"
-                  progress={ratio}
-                  subtitle={
-                    entry.duration > 0
-                      ? strings.continuePercent(percent)
-                      : entry.sourceTitle
-                  }
-                  onRemoveWatching={() => dismissContinueWatching(item.imdbId)}
-                  onPress={() =>
-                    router.push({
-                      pathname: '/title/[id]',
-                      params: {
-                        id: item.imdbId,
-                        resumeUri: entry.uri,
-                        resumeKey: entry.key,
-                        resumeAt: String(Math.floor(entry.position)),
-                        resumeTitle: entry.sourceTitle,
-                        resumeEdition: entry.edition,
-                        resumeReferer: entry.referer ?? '',
-                      },
-                    })
-                  }
-                />
-              );
-            })}
-          </HomeCarousel>
+            <HomeCarousel
+              title={strings.nowPlayingSection}
+              icon="play-circle"
+              iconColor={colors.gold}
+              data={watchingCards as WatchingRow[]}
+              keyExtractor={watchingKey}
+              renderItem={renderWatchingCard}
+              itemWidth={posterWidth}
+            />
           ) : null}
 
           {movies2026.length > 0 ? (
-            <HomeCarousel title={strings.movies2026Section} icon="film" iconColor={colors.gold}>
-              {movies2026.map((item) => (
-                <HomeTitleCard
-                  key={item.imdbId}
-                  item={item}
-                  width={posterWidth}
-                  favorited={isFavorite(item.imdbId)}
-                  onToggleFavorite={() => toggleFavorite(item.imdbId)}
-                  onPress={() => openTitle(item)}
-                />
-              ))}
-            </HomeCarousel>
+            <HomeCarousel
+              title={strings.movies2026Section}
+              icon="film"
+              iconColor={colors.gold}
+              data={movies2026}
+              keyExtractor={catalogKey}
+              renderItem={renderCatalogCard}
+              itemWidth={posterWidth}
+            />
           ) : null}
 
-          <HomeCarousel title={strings.topMoviesSection} icon="star" iconColor={colors.gold}>
-            {topMovies.map((item) => (
-              <HomeTitleCard
-                key={item.imdbId}
-                item={item}
-                width={posterWidth}
-                favorited={isFavorite(item.imdbId)}
-                onToggleFavorite={() => toggleFavorite(item.imdbId)}
-                onPress={() => openTitle(item)}
-              />
-            ))}
-          </HomeCarousel>
+          <HomeCarousel
+            title={strings.topMoviesSection}
+            icon="star"
+            iconColor={colors.gold}
+            data={topMovies}
+            keyExtractor={catalogKey}
+            renderItem={renderCatalogCard}
+            itemWidth={posterWidth}
+          />
 
-          <HomeCarousel title={strings.topSeriesSection} icon="trophy" iconColor={colors.gold}>
-            {topSeries.map((item) => (
-              <HomeTitleCard
-                key={item.imdbId}
-                item={item}
-                width={posterWidth}
-                favorited={isFavorite(item.imdbId)}
-                onToggleFavorite={() => toggleFavorite(item.imdbId)}
-                onPress={() => openTitle(item)}
-              />
-            ))}
-          </HomeCarousel>
+          <HomeCarousel
+            title={strings.topSeriesSection}
+            icon="trophy"
+            iconColor={colors.gold}
+            data={topSeries}
+            keyExtractor={catalogKey}
+            renderItem={renderCatalogCard}
+            itemWidth={posterWidth}
+          />
         </ScrollView>
       </SafeAreaView>
       <SupportReminderModal visible={supportOpen} onDismiss={dismissSupport} />

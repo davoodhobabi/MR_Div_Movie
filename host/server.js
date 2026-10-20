@@ -23,6 +23,7 @@ const ALLOWED =
 
 /** Served from dist/downloads after the web export (public/downloads). */
 const DOWNLOAD_FILES = {
+  '/downloads/android.apk': 'android.apk',
   '/downloads/android-tv.apk': 'android-tv.apk',
 };
 

@@ -107,6 +107,13 @@ export default function SettingsScreen() {
             <View style={styles.downloadBlock}>
               <Text style={styles.downloadHeading}>{strings.downloadAppsHeading}</Text>
               <DownloadCard
+                icon="phone-portrait-outline"
+                title={strings.downloadAndroidTitle}
+                hint={strings.downloadAndroidHint}
+                url={strings.downloadAndroidUrl}
+                a11y={strings.downloadAndroidA11y}
+              />
+              <DownloadCard
                 icon="tv-outline"
                 title={strings.downloadAndroidTvTitle}
                 hint={strings.downloadAndroidTvHint}
